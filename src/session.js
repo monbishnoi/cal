@@ -16,14 +16,14 @@ import { performInSessionHandoff } from './session-bridge.js';
 import { logError } from './logger.js';
 
 // API Configuration
-const API_KEY = process.env.CAL_API_KEY || process.env.ANTHROPIC_API_KEY;
-const BASE_URL = process.env.CAL_BASE_URL || process.env.ANTHROPIC_BASE_URL;
-const MODEL = process.env.CAL_MODEL || 'claude-sonnet-4-5';
+const API_KEY = process.env.HYPERSPACE_PROXY_KEY || process.env.ANTHROPIC_API_KEY;
+const BASE_URL = process.env.HYPERSPACE_PROXY_URL || 'http://localhost:6655/anthropic';
+const MODEL = process.env.CAL_MODEL || 'anthropic--claude-4.6-opus';
 
-// Session Bridge: default context window limit
+// Session Bridge: Context window limit (200K tokens for standard Opus)
 const CONTEXT_LIMIT = parseInt(process.env.CAL_CONTEXT_LIMIT) || 200000;
 const THRESHOLD_HANDOFF = 0.90;  // 90% - trigger in-session handoff, then reset
-const THRESHOLD_MID_TOOL_HANDOFF = 0.85;  // 85% - trigger early handoff during tool loops
+const THRESHOLD_MID_TOOL_HANDOFF = 0.85;  // 85% - schedule early handoff after tool loops reach a safe point
 const MAX_MID_LOOP_RESETS = 3;  // Safety limit to prevent infinite handoff loops
 
 export class CalSession {
@@ -41,14 +41,17 @@ export class CalSession {
     };
     this.handoffTriggered = false;  // Track if 90% handoff already ran
     this.midLoopResetCount = 0;  // Track mid-tool-loop resets to prevent infinite loops
+    this.messageQueue = Promise.resolve();  // Serialize access to mutable message history
+    this.isProcessingMessage = false;
+
+    // Steering: queued messages from the user injected between tool iterations
+    this.steerQueue = [];
 
     // Initialize Anthropic client
-    this.client = API_KEY
-      ? new Anthropic({
-          apiKey: API_KEY,
-          ...(BASE_URL ? { baseURL: BASE_URL } : {}),
-        })
-      : null;
+    this.client = new Anthropic({
+      apiKey: API_KEY,
+      baseURL: BASE_URL,
+    });
 
     this.model = MODEL;
 
@@ -76,6 +79,9 @@ export class CalSession {
       if (saved.midLoopResetCount) {
         this.midLoopResetCount = saved.midLoopResetCount;
       }
+      if (saved.visualHistory) {
+        this.visualHistory = saved.visualHistory;
+      }
 
       console.log(`[Session ${this.sessionId}] Restored ${this.messages.length} messages from disk`);
     }
@@ -91,6 +97,7 @@ export class CalSession {
       tokenUsage: this.tokenUsage,
       handoffTriggered: this.handoffTriggered,
       midLoopResetCount: this.midLoopResetCount,
+      visualHistory: this.visualHistory || null,
     });
   }
 
@@ -145,6 +152,31 @@ export class CalSession {
           }
         }
       }
+
+      // Check for user tool_result blocks without the immediately preceding assistant tool_use.
+      if (msg.role === 'user' && Array.isArray(msg.content)) {
+        const hasToolResult = msg.content.some(c => c.type === 'tool_result');
+
+        if (hasToolResult) {
+          const prevMsg = this.messages[i - 1];
+          if (!prevMsg || prevMsg.role !== 'assistant' || !Array.isArray(prevMsg.content)) {
+            console.warn(`[Session ${this.sessionId}] Corrupted history at index ${i}: orphaned tool_result. Truncating.`);
+            this.messages = this.messages.slice(0, i);
+            return false;
+          }
+
+          const toolResultIds = msg.content.filter(c => c.type === 'tool_result').map(c => c.tool_use_id);
+          const toolUseIds = prevMsg.content.filter(c => c.type === 'tool_use').map(c => c.id);
+
+          for (const id of toolResultIds) {
+            if (!toolUseIds.includes(id)) {
+              console.warn(`[Session ${this.sessionId}] tool_result ${id} has no matching tool_use. Truncating.`);
+              this.messages = this.messages.slice(0, i);
+              return false;
+            }
+          }
+        }
+      }
     }
 
     // Also ensure the last message isn't an orphaned assistant tool_use
@@ -170,7 +202,48 @@ export class CalSession {
    * @returns {Promise<{text: string, usageStatus: Object}>} - Response with usage status
    */
   async sendMessage(userMessage, options = {}) {
-    const { onToolCall, onResponse, maxIterations: customMaxIterations, isBackgroundJob } = options;
+    if (options.internal && this.isProcessingMessage) {
+      return this._sendMessage(userMessage, options);
+    }
+
+    const run = async () => {
+      this.isProcessingMessage = true;
+      try {
+        return await this._sendMessage(userMessage, options);
+      } finally {
+        this.isProcessingMessage = false;
+      }
+    };
+
+    const previous = this.messageQueue.catch(() => {});
+    const next = previous.then(run);
+    this.messageQueue = next.catch(() => {});
+    return next;
+  }
+
+  async appendSystemNote(note) {
+    const run = async () => {
+      const text = typeof note === 'string' && note.trim()
+        ? note
+        : '[SYSTEM: Background event recorded.]';
+
+      this.messages.push({
+        role: 'user',
+        content: text,
+      });
+
+      this.persistToDisk();
+      return true;
+    };
+
+    const previous = this.messageQueue.catch(() => {});
+    const next = previous.then(run);
+    this.messageQueue = next.catch(() => {});
+    return next;
+  }
+
+  async _sendMessage(userMessage, options = {}) {
+    const { onToolCall, onToolResult, onResponse, maxIterations: customMaxIterations, isBackgroundJob, isHandoff } = options;
 
     if (!this.isInitialized) {
       await this.initialize();
@@ -179,8 +252,10 @@ export class CalSession {
     // Capture original user message for continuation prompt (used if mid-tool-loop handoff occurs)
     const originalUserMessage = userMessage;
 
-    // Reset mid-loop counter for new user request
-    this.midLoopResetCount = 0;
+    // Reset mid-loop counter for new user requests, but not nested handoff prompts.
+    if (!options.internal) {
+      this.midLoopResetCount = 0;
+    }
 
     console.log(`[Session ${this.sessionId}] Sending: ${userMessage.substring(0, 50)}...`);
 
@@ -211,6 +286,8 @@ export class CalSession {
       // Tool use loop
       let iterations = 0;
       const maxIterations = customMaxIterations || 10;  // Default 10 for interactive, can be overridden per-job
+      let shouldHandoffAfterResponse = false;
+      let deferredHandoffUsage = null;
 
       while (response.stop_reason === 'tool_use' && iterations < maxIterations) {
         iterations++;
@@ -237,6 +314,10 @@ export class CalSession {
           try {
             const result = await executeToolCall(toolUse.name, toolUse.input);
 
+            if (onToolResult) {
+              onToolResult(toolUse.name, false);
+            }
+
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
@@ -244,6 +325,10 @@ export class CalSession {
             });
           } catch (err) {
             console.error(`[Session ${this.sessionId}] Tool error:`, err.message);
+
+            if (onToolResult) {
+              onToolResult(toolUse.name, true);
+            }
 
             // Log tool errors with structured data
             const isTimeout = err.message.includes('ETIMEDOUT') || err.message.includes('timed out');
@@ -272,13 +357,25 @@ export class CalSession {
           content: toolResults,
         });
 
+        // Steering: inject any queued user guidance before the next Claude call
+        if (this.steerQueue.length > 0) {
+          const steers = this.steerQueue.splice(0);
+          const steerText = `[USER STEERING]: ${steers.join('\n')}`;
+          console.log(`[Session ${this.sessionId}] Injecting ${steers.length} steer message(s)`);
+          this.messages.push({
+            role: 'user',
+            content: steerText,
+          });
+        }
+
         // Continue conversation with tool results
         try {
           response = await this.callClaude();
 
-          // Mid-tool-loop handoff: Check if approaching context limit
+          // Early handoff: Check if approaching context limit.
+          // If Claude still wants tools, defer the actual reset until we have a final assistant response.
           const midLoopUsage = this.getUsageStatus();
-          if (midLoopUsage.percentage >= THRESHOLD_MID_TOOL_HANDOFF && !this.handoffTriggered) {
+          if (midLoopUsage.percentage >= THRESHOLD_MID_TOOL_HANDOFF && !this.handoffTriggered && !isHandoff) {
             // Safety check: don't reset infinitely
             if (this.midLoopResetCount >= MAX_MID_LOOP_RESETS) {
               console.warn(`[Session ${this.sessionId}] Hit max mid-loop resets (${MAX_MID_LOOP_RESETS}). Stopping to avoid infinite loop.`);
@@ -290,49 +387,23 @@ export class CalSession {
                 stop_reason: 'end_turn'
               };
             } else {
-              console.log(`[Session ${this.sessionId}] ${(midLoopUsage.percentage * 100).toFixed(1)}% reached mid-tool-loop, triggering early handoff`);
+              console.log(`[Session ${this.sessionId}] ${(midLoopUsage.percentage * 100).toFixed(1)}% reached mid-tool-loop, deferring handoff until a safe point`);
 
               // Log session bridge trigger with structured data
               logError('session_bridge', {
                 session: this.sessionId,
                 message: originalUserMessage?.substring(0, 100),
                 percentage: midLoopUsage.percentageFormatted,
-                recovery: 'Mid-tool-loop handoff triggered',
+                recovery: 'Deferred until tool loop reaches a safe point',
               });
 
               // 1. Notify user via callback (if available)
               if (onToolCall) {
-                onToolCall('system', { status: 'Saving progress, continuing...' });
+                onToolCall('system', { status: 'Finishing current step before saving progress...' });
               }
 
-              // 2. Perform full handoff (persist to daily log, MEMORY.md, handoff file)
-              try {
-                await performInSessionHandoff(this);
-              } catch (handoffErr) {
-                console.error(`[Session ${this.sessionId}] Mid-loop handoff failed:`, handoffErr.message);
-                // Continue without handoff rather than failing the whole request
-              }
-
-              // 3. Increment reset counter
-              this.midLoopResetCount++;
-
-              // 4. Reset session (loads fresh context including restoration)
-              this.reset();
-
-              // 5. Re-initialize to reload system prompt with restoration context
-              this.isInitialized = false;
-              await this.initialize();
-
-              // 6. Inject continuation prompt
-              this.messages.push({
-                role: 'user',
-                content: `[SYSTEM: Session refreshed mid-task to preserve context. Continue working on the following task — it is NOT complete yet, keep going.]\n\n${originalUserMessage}`,
-              });
-
-              // 7. Get fresh response (loop continues naturally if Cal needs more tools)
-              response = await this.callClaude();
-
-              console.log(`[Session ${this.sessionId}] Mid-loop handoff complete, continuing task`);
+              shouldHandoffAfterResponse = true;
+              deferredHandoffUsage = midLoopUsage;
             }
           }
         } catch (apiErr) {
@@ -358,7 +429,7 @@ export class CalSession {
 
             // Emergency handoff - try to save what we can
             try {
-              await performInSessionHandoff(this);
+              await performInSessionHandoff(this, { internal: true });
             } catch (handoffErr) {
               console.error(`[Session ${this.sessionId}] Emergency handoff failed:`, handoffErr.message);
             }
@@ -480,26 +551,41 @@ export class CalSession {
 
       // Final response (no more tools)
       // Ensure we have content to push
-      if (response.content && response.content.length > 0) {
-        this.messages.push({
-          role: 'assistant',
-          content: response.content,
-        });
-      } else {
+      let finalContent = response.content;
+      if (!finalContent || finalContent.length === 0) {
         // Empty response - add a placeholder to avoid corruption
         console.warn(`[Session ${this.sessionId}] Empty response content, adding placeholder`);
-        this.messages.push({
-          role: 'assistant',
-          content: [{ type: 'text', text: '(completed)' }],
-        });
+        finalContent = [{ type: 'text', text: '(completed)' }];
       }
+
+      this.messages.push({
+        role: 'assistant',
+        content: finalContent,
+      });
 
       // Persist to disk
       this.persistToDisk();
 
       // Extract final text
-      const textContent = response.content.filter(c => c.type === 'text');
-      const finalText = textContent.map(c => c.text).join('\n');
+      const textContent = finalContent.filter(c => c.type === 'text');
+      let finalText = textContent.map(c => c.text).join('\n');
+
+      if (shouldHandoffAfterResponse && !this.handoffTriggered) {
+        const usage = deferredHandoffUsage || this.getUsageStatus();
+        console.log(`[Session ${this.sessionId}] Safe point reached after tool loop, performing deferred handoff at ${usage.percentageFormatted}`);
+
+        try {
+          await performInSessionHandoff(this, { internal: true });
+          this.midLoopResetCount++;
+          this.reset();
+          this.isInitialized = false;
+          await this.initialize();
+          finalText += '\n\n---\nSession saved and refreshed. Continuing...';
+          console.log(`[Session ${this.sessionId}] Deferred handoff complete`);
+        } catch (handoffErr) {
+          console.error(`[Session ${this.sessionId}] Deferred handoff failed:`, handoffErr.message);
+        }
+      }
 
       console.log(`[Session ${this.sessionId}] Response complete (${finalText.length} chars)`);
 
@@ -645,10 +731,6 @@ export class CalSession {
    * Call Claude API with current message history
    */
   async callClaude() {
-    if (!this.client) {
-      throw new Error('CAL_API_KEY is required. Set it in your environment or config/.env.');
-    }
-
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: 4096,
@@ -701,14 +783,42 @@ export class CalSession {
   }
 
   /**
+   * Queue a steering message for injection between tool iterations.
+   */
+  addSteer(text) {
+    this.steerQueue.push(text);
+    console.log(`[Session ${this.sessionId}] Steer queued: "${text.substring(0, 50)}"`);
+  }
+
+  /**
    * Clear conversation history (keep system prompt)
    */
   reset() {
     console.log(`[Session ${this.sessionId}] Resetting session`);
+
+    // Preserve last 20 text exchanges for PWA visual continuity
+    this.visualHistory = this.extractVisualHistory(20);
+
     this.messages = [];
     this.tokenUsage = { inputTokens: 0, outputTokens: 0, lastUpdated: null };
     this.handoffTriggered = false;
     this.handoffMessageIndex = null;
     this.persistToDisk();
+  }
+
+  extractVisualHistory(limit = 20) {
+    const history = [];
+    for (let i = this.messages.length - 1; i >= 0 && history.length < limit; i--) {
+      const msg = this.messages[i];
+      let text = '';
+      if (typeof msg.content === 'string') {
+        text = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        text = msg.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+      }
+      if (!text.trim() || text.trim().startsWith('[SYSTEM:')) continue;
+      history.unshift({ role: msg.role, content: msg.content });
+    }
+    return history;
   }
 }

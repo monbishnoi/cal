@@ -1,47 +1,5 @@
-# Dependencies
-node_modules/
-
-# Environment files with secrets
-config/.env
-*.env
-
-# User configuration (personal data)
-config/user.json
 config/imessage.json
-config/jobs.json
-
-# Personal workflow skills are not distributable app skills
-.claude/skills/
-cloud/skills/
-
-# Session data (personal)
-data/sessions.json
-data/last-handoff.json
-data/emergency-snapshot-*.json
-
-# Memory and context (personal data)
-memory/*.md
-!memory/.gitkeep
-context/USER.md
-context/MEMORY.md
-context/ACTION-ITEMS.md
-!context/*.example.md
-
-# Logs
-logs/
-!logs/
-!logs/.gitkeep
-
-# macOS
-.DS_Store
-
-# Editor
-*.swp
-*.swo
-*~
-
-# Internal development notes (not for distribution)
-docs/DISTRIBUTION-TODO.md
-
-# OAuth tokens (personal credentials)
-data/oauth/
+config/.env.push
+config/tls.crt
+config/tls.key
+data/push-subscriptions.json

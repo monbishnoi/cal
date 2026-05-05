@@ -13,15 +13,19 @@ import { initSessionStore, flushToDisk } from './session-store.js';
 import { CalSession } from './session.js';
 import { initScheduler, stopScheduler, triggerJob, getJobStatus, loadJobs } from './scheduler.js';
 import { startIMessage, stopIMessage, sendMessage as sendIMessage, setSession as setIMessageSession } from './imessage.js';
-import { startHttpServer, stopHttpServer, getHttpPort, getHttpHost, setSession as setHttpSession } from './http-server.js';
+import { startHttpServer, stopHttpServer, getHttpPort, getHttpHost, setSession as setHttpSession, wsBroadcast, wsIsConnected } from './http-server.js';
 import { routeOutput } from './output.js';
+import { sendWebPush } from './web-push.js';
 import { loadSkills, getSkillNames } from './skills.js';
 import { initMCPClients, getMCPClientManager } from './mcp-client.js';
 import { performInSessionHandoff } from './session-bridge.js';
 import { logError, logInfo } from './logger.js';
 import { CAL_HOME } from './paths.js';
+import { getToday } from './context.js';
 import { getMainSessionId, getBackgroundSessionId, getTimezone } from './user-config.js';
 import { filterRuntimeMCPServers } from './runtime-config.js';
+import fs from 'fs';
+import path from 'path';
 
 let startTelegram = null;
 let stopTelegram = null;
@@ -68,7 +72,7 @@ function getMainSession() {
 }
 
 /**
- * Send notification via iMessage (if enabled)
+ * Send notification via configured channel (Telegram preferred, fallback to iMessage)
  */
 async function sendNotification(message) {
   if (telegramEnabled && sendTelegram) {
@@ -89,6 +93,10 @@ function getBackgroundSession() {
     backgroundSession = new CalSession(BACKGROUND_SESSION_ID);
   }
   return backgroundSession;
+}
+
+function resolveDatedPath(relativePath) {
+  return relativePath.replace(/YYYY-MM-DD/g, getToday());
 }
 
 const NEWS_DIGEST_MARKER = /(?:^|\n)(?:\*\*)?(?:📡|📰)\s*(?:AI\s+)?News Digest\s+[—-]/u;
@@ -202,6 +210,78 @@ function getJobDeliveryResponse(job, response, session, messageStartIndex) {
   return digest;
 }
 
+function archiveJobOutput(job, response, session, messageStartIndex, options = {}) {
+  if (!job.archiveOutputPath) {
+    return null;
+  }
+
+  const relativePath = resolveDatedPath(job.archiveOutputPath);
+  const fullPath = path.join(CAL_HOME, relativePath);
+  const messages = session.messages.slice(messageStartIndex);
+  const toolResults = [];
+  const responseText = normalizeMessageText(response);
+
+  for (const msg of messages) {
+    if (msg.role !== 'user' || !Array.isArray(msg.content)) continue;
+
+    for (const part of msg.content) {
+      if (part.type !== 'tool_result' || !part.content) continue;
+      const content = String(part.content).trim();
+      if (!content) continue;
+      const digestBlock = extractDigestBlock(content);
+      if (digestBlock && normalizeMessageText(digestBlock) === responseText) continue;
+      toolResults.push(content.length > 4000 ? content.substring(0, 4000) + '\n[truncated]' : content);
+    }
+  }
+
+  const archived = [
+    `# ${job.name} - ${getToday()}`,
+    '',
+    '## Final Digest',
+    '',
+    response || '(no response)',
+  ];
+
+  if (options.completionSummary && normalizeMessageText(options.completionSummary) !== responseText) {
+    archived.push(
+      '',
+      '## Completion Summary',
+      '',
+      options.completionSummary
+    );
+  }
+
+  if (toolResults.length > 0) {
+    archived.push(
+      '',
+      '## Research Notes',
+      '',
+      ...toolResults.map((content, index) => `### Tool Result ${index + 1}\n\n${content}`)
+    );
+  }
+
+  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  fs.writeFileSync(fullPath, archived.join('\n'), 'utf8');
+  console.log(`[Gateway] Archived ${job.id} output to ${fullPath}`);
+
+  return relativePath;
+}
+
+async function recordBackgroundJobPointer(job, archivePath) {
+  if (!job.recordMainSessionPointer) {
+    return;
+  }
+
+  const main = getMainSession();
+  const archiveLine = archivePath || '(archive unavailable)';
+
+  await main.appendSystemNote(
+    `[SYSTEM: Background job "${job.name}" completed. Its result and research notes were archived at ${archiveLine}. If the user asks follow-up questions about this job, read that file first instead of relying on conversation history.]`
+  );
+
+  console.log(`[Gateway] Recorded ${job.id} archive pointer in main session`);
+}
+
 /**
  * Job executor - called when a scheduled job fires
  * Uses shared session for interactive jobs, separate session for background jobs
@@ -247,8 +327,25 @@ async function executeJob(job) {
 
     const deliveryResponse = getJobDeliveryResponse(job, response, session, messageStartIndex);
 
-    // Route output to appropriate destination
-    await routeOutput(job, deliveryResponse);
+    const archivePath = archiveJobOutput(job, deliveryResponse, session, messageStartIndex, {
+      completionSummary: response,
+    });
+    if (isBackgroundJob) {
+      await recordBackgroundJobPointer(job, archivePath);
+    }
+
+    // Route output to appropriate destination(s)
+    if (sendTelegram) {
+      await sendTelegram(deliveryResponse);
+    }
+    if (wsIsConnected()) {
+      wsBroadcast({ type: 'proactive', text: deliveryResponse, messageId: `msg-${Date.now()}` });
+    } else {
+      await sendWebPush({ title: job.name || 'Cal', body: deliveryResponse });
+    }
+    if (job.output === 'file') {
+      await routeOutput(job, deliveryResponse);
+    }
 
     console.log(`[Gateway] Job complete: ${job.id}`);
     console.log(`[Gateway] ════════════════════════════════════════\n`);

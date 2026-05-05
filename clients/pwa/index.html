@@ -1,300 +1,1197 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cal</title>
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Cal">
-    <link rel="apple-touch-icon" href="icon-192.png">
-    <link rel="manifest" href="manifest.json">
-    <!-- Inter font for better readability -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <!-- Marked.js for markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-weight: 400;
-            background: #1a1a2e;
-            color: #e8e8ed;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            font-size: 15px;
-            line-height: 1.6;
-            letter-spacing: -0.01em;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-        .header {
-            padding: 16px 20px;
-            background: #16213e;
-            border-bottom: 1px solid #333;
-        }
-        .header h1 {
-            font-size: 18px;
-            font-weight: 600;
-            letter-spacing: -0.02em;
-        }
-        .messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-        }
-        .message {
-            margin-bottom: 16px;
-            max-width: 85%;
-            line-height: 1.65;
-        }
-        .message.user {
-            margin-left: auto;
-            background: #0f3460;
-            padding: 12px 16px;
-            border-radius: 18px 18px 4px 18px;
-        }
-        .message.assistant {
-            background: #1f1f3a;
-            padding: 16px 20px;
-            border-radius: 18px 18px 18px 4px;
-            color: #d8d8dc;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101014">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Cal">
+  <meta name="format-detection" content="telephone=no">
+  <title>Cal</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101014;
+      --surface: #18191d;
+      --surface-2: #22242a;
+      --surface-3: #2c2f36;
+      --text: #f4f0ea;
+      --muted: #aaa7a1;
+      --subtle: #74716c;
+      --border: rgba(244, 240, 234, 0.12);
+      --user: #176b87;
+      --assistant: #24262c;
+      --accent: #d6a45f;
+      --accent-2: #58c7a5;
+      --danger: #f07167;
+      --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+    }
 
-        /* ===== Markdown Styling for Assistant Messages ===== */
-        .message.assistant h1,
-        .message.assistant h2,
-        .message.assistant h3,
-        .message.assistant h4 {
-            color: #b388ff;
-            font-weight: 600;
-            margin-top: 1em;
-            margin-bottom: 0.5em;
-            line-height: 1.3;
-        }
-        .message.assistant h1:first-child,
-        .message.assistant h2:first-child,
-        .message.assistant h3:first-child {
-            margin-top: 0;
-        }
-        .message.assistant h1 { font-size: 1.4em; }
-        .message.assistant h2 { font-size: 1.2em; }
-        .message.assistant h3 { font-size: 1.1em; }
-        .message.assistant h4 { font-size: 1em; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
 
-        .message.assistant p {
-            margin-bottom: 0.75em;
-        }
-        .message.assistant p:last-child {
-            margin-bottom: 0;
-        }
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+    }
 
-        .message.assistant ul,
-        .message.assistant ol {
-            margin: 0.5em 0 0.75em 1.5em;
-            padding: 0;
-        }
-        .message.assistant li {
-            margin-bottom: 0.35em;
-        }
-        .message.assistant li:last-child {
-            margin-bottom: 0;
-        }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
 
-        .message.assistant strong {
-            color: #e8e8ed;
-            font-weight: 600;
-        }
+    button,
+    textarea {
+      font: inherit;
+    }
 
-        .message.assistant em {
-            color: #a8a8b0;
-            font-style: italic;
-        }
+    button {
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+    }
 
-        .message.assistant a {
-            color: #b388ff;
-            text-decoration: none;
-        }
-        .message.assistant a:hover {
-            text-decoration: underline;
-        }
+    #app {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      height: 100vh;
+      height: 100dvh;
+      background:
+        linear-gradient(180deg, rgba(214, 164, 95, 0.08), transparent 220px),
+        var(--bg);
+    }
 
-        .message.assistant code {
-            font-family: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
-            font-size: 0.9em;
-            background: #2a2a4a;
-            padding: 0.15em 0.4em;
-            border-radius: 4px;
-            color: #e8b4ff;
-        }
+    .topbar {
+      position: relative;
+      z-index: 4;
+      display: grid;
+      grid-template-columns: 44px 1fr 44px;
+      align-items: center;
+      min-height: calc(56px + var(--safe-top));
+      padding: var(--safe-top) calc(12px + var(--safe-right)) 0 calc(12px + var(--safe-left));
+      background: rgba(16, 16, 20, 0.84);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
 
-        .message.assistant pre {
-            background: #12121f;
-            border-radius: 8px;
-            padding: 12px 16px;
-            margin: 0.75em 0;
-            overflow-x: auto;
-        }
-        .message.assistant pre code {
-            background: none;
-            padding: 0;
-            font-size: 0.85em;
-            line-height: 1.5;
-            color: #c8c8d0;
-        }
+    .brand {
+      min-width: 0;
+      text-align: center;
+    }
 
-        .message.assistant blockquote {
-            border-left: 3px solid #9c27b0;
-            padding-left: 12px;
-            margin: 0.75em 0;
-            color: #a8a8b0;
-            font-style: italic;
-        }
+    .brand h1 {
+      font-size: 17px;
+      font-weight: 650;
+      letter-spacing: 0;
+      line-height: 1.2;
+    }
 
-        .message.assistant table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 0.75em 0;
-            font-size: 0.9em;
-        }
-        .message.assistant th,
-        .message.assistant td {
-            padding: 8px 12px;
-            border: 1px solid #3a3a5a;
-            text-align: left;
-        }
-        .message.assistant th {
-            background: #2a2a4a;
-            color: #b388ff;
-            font-weight: 600;
-        }
-        .message.assistant tr:hover td {
-            background: #25253d;
-        }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 100%;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-        .message.assistant hr {
-            border: none;
-            border-top: 1px solid #3a3a5a;
-            margin: 1em 0;
-        }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: var(--subtle);
+    }
 
-        /* ===== Input Area ===== */
-        .input-area {
-            padding: 12px 16px;
-            background: #16213e;
-            border-top: 1px solid #333;
-            display: flex;
-            gap: 8px;
-        }
-        #input {
-            flex: 1;
-            padding: 12px 16px;
-            border: none;
-            border-radius: 24px;
-            background: #1a1a2e;
-            color: #e8e8ed;
-            font-family: inherit;
-            font-size: 15px;
-            line-height: 1.5;
-        }
-        #input:focus { outline: 2px solid #0f3460; }
-        #input::placeholder { color: #666; }
-        #send {
-            padding: 12px 20px;
-            border: none;
-            border-radius: 24px;
-            background: #9c27b0;
-            color: white;
-            font-family: inherit;
-            font-weight: 500;
-            font-size: 14px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        #send:hover { background: #7b1fa2; }
-        #send:disabled { opacity: 0.5; }
-        .loading { opacity: 0.6; font-style: italic; }
-    </style>
+    .status-dot.online {
+      background: var(--accent-2);
+      box-shadow: 0 0 12px rgba(88, 199, 165, 0.8);
+    }
+
+    .status-dot.busy {
+      background: var(--accent);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    .status-dot.error {
+      background: var(--danger);
+    }
+
+    @keyframes pulse {
+      50% {
+        opacity: 0.45;
+        transform: scale(0.82);
+      }
+    }
+
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .icon-button:active {
+      background: rgba(244, 240, 234, 0.08);
+      color: var(--text);
+    }
+
+    .icon-button svg {
+      width: 21px;
+      height: 21px;
+      stroke-width: 2;
+    }
+
+    .messages {
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      padding: 18px calc(14px + var(--safe-right)) 18px calc(14px + var(--safe-left));
+      scroll-padding-bottom: 24px;
+    }
+
+    .messages::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+
+    .empty {
+      min-height: 100%;
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      gap: 14px;
+      padding: 40px 18px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .empty-mark {
+      display: grid;
+      place-items: center;
+      width: 58px;
+      height: 58px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--accent);
+      box-shadow: var(--shadow);
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .empty h2 {
+      color: var(--text);
+      font-size: 22px;
+      font-weight: 680;
+      letter-spacing: 0;
+    }
+
+    .empty p {
+      max-width: 300px;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .message {
+      display: flex;
+      margin: 0 0 12px;
+      animation: rise 0.18s ease-out;
+    }
+
+    @keyframes rise {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+    }
+
+    .message.user {
+      justify-content: flex-end;
+    }
+
+    .message.assistant {
+      justify-content: flex-start;
+    }
+
+    .bubble {
+      max-width: min(86%, 760px);
+      padding: 11px 13px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 15px;
+      line-height: 1.52;
+      overflow-wrap: anywhere;
+      white-space: normal;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    .message.user .bubble {
+      background: var(--user);
+      color: white;
+      border-color: rgba(255, 255, 255, 0.12);
+      border-bottom-right-radius: 3px;
+    }
+
+    .message.assistant .bubble {
+      background: var(--assistant);
+      color: var(--text);
+      border-bottom-left-radius: 3px;
+    }
+
+    .message.pending .bubble {
+      color: var(--muted);
+    }
+
+    .message.pre-reset {
+      opacity: 0.55;
+    }
+
+    .session-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 16px 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .session-divider::before,
+    .session-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .bubble p,
+    .bubble ul,
+    .bubble ol,
+    .bubble pre,
+    .bubble blockquote {
+      margin: 0 0 0.75em;
+    }
+
+    .bubble :last-child {
+      margin-bottom: 0;
+    }
+
+    .bubble ul,
+    .bubble ol {
+      padding-left: 1.25em;
+    }
+
+    .bubble li {
+      margin-bottom: 0.3em;
+    }
+
+    .bubble h1,
+    .bubble h2,
+    .bubble h3 {
+      margin: 0.9em 0 0.45em;
+      color: #ffe2b8;
+      font-weight: 680;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .bubble h1:first-child,
+    .bubble h2:first-child,
+    .bubble h3:first-child {
+      margin-top: 0;
+    }
+
+    .bubble h1 { font-size: 1.25em; }
+    .bubble h2 { font-size: 1.14em; }
+    .bubble h3 { font-size: 1.05em; }
+
+    .bubble a {
+      color: #88d8c3;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .bubble code {
+      font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      padding: 0.12em 0.35em;
+      border-radius: 5px;
+      background: rgba(0, 0, 0, 0.26);
+      color: #f8d49a;
+    }
+
+    .bubble pre {
+      overflow-x: auto;
+      padding: 11px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.28);
+    }
+
+    .bubble pre code {
+      padding: 0;
+      background: transparent;
+      white-space: pre;
+    }
+
+    .bubble blockquote {
+      padding-left: 11px;
+      border-left: 3px solid var(--accent);
+      color: var(--muted);
+    }
+
+    .table-wrap {
+      max-width: 100%;
+      overflow-x: auto;
+      margin: 0 0 0.75em;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .bubble table {
+      min-width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
+
+    .bubble th,
+    .bubble td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .bubble th {
+      background: rgba(214, 164, 95, 0.12);
+      color: #ffe2b8;
+      font-weight: 650;
+    }
+
+    .bubble tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .task-list {
+      list-style: none;
+      padding-left: 0 !important;
+    }
+
+    .task-list li {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+    }
+
+    .task-box {
+      display: inline-grid;
+      place-items: center;
+      width: 16px;
+      height: 16px;
+      margin-top: 3px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent-2);
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .composer {
+      z-index: 5;
+      padding: 10px calc(12px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(12px + var(--safe-left));
+      background: rgba(16, 16, 20, 0.9);
+      border-top: 1px solid var(--border);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+
+    .composer-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 44px;
+      align-items: end;
+      gap: 8px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    textarea {
+      width: 100%;
+      max-height: 132px;
+      min-height: 44px;
+      resize: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 11px 13px;
+      background: var(--surface);
+      color: var(--text);
+      caret-color: var(--accent);
+      font-size: 16px;
+      line-height: 1.35;
+      outline: none;
+    }
+
+    textarea:focus {
+      border-color: rgba(214, 164, 95, 0.72);
+      box-shadow: 0 0 0 3px rgba(214, 164, 95, 0.14);
+    }
+
+    textarea::placeholder {
+      color: var(--subtle);
+    }
+
+    .send {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #14110d;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    .send:active {
+      transform: translateY(1px);
+    }
+
+    .send:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    .send svg {
+      width: 21px;
+      height: 21px;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(78px + var(--safe-bottom));
+      z-index: 20;
+      max-width: calc(100vw - 32px);
+      padding: 10px 13px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-3);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      font-size: 13px;
+      line-height: 1.3;
+      transform: translateX(-50%) translateY(10px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%);
+    }
+
+    @media (min-width: 720px) {
+      .topbar {
+        grid-template-columns: 72px 1fr 72px;
+        padding-left: 20px;
+        padding-right: 20px;
+      }
+
+      .messages {
+        padding-left: 24px;
+        padding-right: 24px;
+      }
+
+      .bubble {
+        max-width: min(72%, 760px);
+      }
+    }
+
+    .activity-feed {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.18);
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    .activity-step {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .activity-step .step-icon {
+      flex: 0 0 14px;
+      font-size: 11px;
+    }
+
+    .activity-step.done .step-icon {
+      color: var(--accent-2);
+    }
+
+    .activity-step.active .step-icon {
+      color: var(--accent);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
 </head>
 <body>
-    <div class="header">
+  <div id="app">
+    <header class="topbar">
+      <div aria-hidden="true"></div>
+      <div class="brand">
         <h1>Cal</h1>
-    </div>
-    <div class="messages" id="messages"></div>
-    <div class="input-area">
-        <input type="text" id="input" placeholder="Message Cal..." autocomplete="off">
-        <button id="send">Send</button>
-    </div>
+        <div class="status" aria-live="polite">
+          <span class="status-dot busy" id="statusDot"></span>
+          <span id="statusText">Loading session</span>
+        </div>
+      </div>
+      <button class="icon-button" id="refreshBtn" type="button" aria-label="Refresh session" title="Refresh session">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M21 12a9 9 0 0 1-15.3 6.4"></path>
+          <path d="M3 12A9 9 0 0 1 18.3 5.6"></path>
+          <path d="M18 2v4h4"></path>
+          <path d="M6 22v-4H2"></path>
+        </svg>
+      </button>
+    </header>
 
-    <script>
-        const messages = document.getElementById('messages');
-        const input = document.getElementById('input');
-        const sendBtn = document.getElementById('send');
+    <main class="messages" id="messages" aria-live="polite">
+      <section class="empty" id="emptyState">
+        <div class="empty-mark">C</div>
+        <h2>Hi, I am Cal.</h2>
+        <p>Ready when you are.</p>
+      </section>
+    </main>
 
-        // Configure marked for safe rendering
-        marked.setOptions({
-            breaks: true,      // Convert \n to <br>
-            gfm: true,         // GitHub Flavored Markdown
-            headerIds: false,  // Don't add IDs to headers
-            mangle: false      // Don't mangle email addresses
+    <form class="composer" id="composer">
+      <div class="composer-shell">
+        <textarea id="input" rows="1" maxlength="4000" autocomplete="off" autocapitalize="sentences" placeholder="Message Cal..."></textarea>
+        <button class="send" id="send" type="submit" aria-label="Send message" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M22 2 11 13"></path>
+            <path d="m22 2-7 20-4-9-9-4 20-7Z"></path>
+          </svg>
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const messagesEl = document.getElementById('messages');
+    const emptyState = document.getElementById('emptyState');
+    const input = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const composer = document.getElementById('composer');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const toast = document.getElementById('toast');
+
+    let toastTimer = null;
+    let isProcessing = false;
+    let pendingBubble = null;
+    let activityFeed = null;
+
+    // --- WebSocket Connection ---
+    const WS_ORIGIN = window.location.protocol === 'file:'
+      ? 'ws://127.0.0.1:8080'
+      : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+    const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8080' : '';
+
+    let ws = null;
+    let wsReconnectDelay = 1000;
+    const WS_MAX_DELAY = 16000;
+
+    function wsConnect() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+      ws = new WebSocket(WS_ORIGIN + '/ws');
+
+      ws.addEventListener('open', () => {
+        console.log('[WS] Connected');
+        wsReconnectDelay = 1000;
+        setStatus('online', 'Connected');
+        // Request history sync on connect
+        ws.send(JSON.stringify({ type: 'sync' }));
+      });
+
+      ws.addEventListener('message', (event) => {
+        let msg;
+        try { msg = JSON.parse(event.data); } catch { return; }
+        handleServerEvent(msg);
+      });
+
+      ws.addEventListener('close', () => {
+        console.log('[WS] Disconnected');
+        ws = null;
+        if (!isProcessing) setStatus('error', 'Disconnected');
+        scheduleReconnect();
+      });
+
+      ws.addEventListener('error', () => {
+        // Error fires before close — just let close handle reconnection
+      });
+    }
+
+    function scheduleReconnect() {
+      setTimeout(() => {
+        wsConnect();
+      }, wsReconnectDelay);
+      wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_MAX_DELAY);
+    }
+
+    function wsSend(msg) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+        return true;
+      }
+      return false;
+    }
+
+    // --- Handle Server Events ---
+    function handleServerEvent(msg) {
+      switch (msg.type) {
+        case 'status':
+          if (msg.state === 'idle' && !isProcessing) setStatus('online', 'Ready');
+          break;
+
+        case 'history':
+          renderHistory(msg);
+          break;
+
+        case 'run_started':
+          isProcessing = true;
+          setStatus('busy', 'Working');
+          // Create pending bubble with activity feed
+          pendingBubble = addMessage('', 'assistant', { pending: true });
+          activityFeed = document.createElement('div');
+          activityFeed.className = 'activity-feed';
+          pendingBubble.querySelector('.bubble').appendChild(activityFeed);
+          break;
+
+        case 'step_started':
+          if (activityFeed) {
+            const step = document.createElement('div');
+            step.className = 'activity-step active';
+            step.dataset.tool = msg.tool;
+            step.innerHTML = `<span class="step-icon">●</span><span>${escapeHtml(msg.description || msg.tool)}</span>`;
+            activityFeed.appendChild(step);
+            scrollToBottom();
+          }
+          break;
+
+        case 'step_finished':
+          if (activityFeed) {
+            const activeStep = activityFeed.querySelector(`.activity-step.active[data-tool="${msg.tool}"]`);
+            if (activeStep) {
+              activeStep.classList.remove('active');
+              activeStep.classList.add('done');
+              activeStep.querySelector('.step-icon').textContent = '✓';
+            }
+          }
+          break;
+
+        case 'text_done':
+          if (pendingBubble) {
+            pendingBubble.remove();
+            pendingBubble = null;
+            activityFeed = null;
+          }
+          addMessage(msg.fullText || 'No response', 'assistant');
+          isProcessing = false;
+          setStatus('online', 'Ready');
+          break;
+
+        case 'run_finished':
+          isProcessing = false;
+          setStatus('online', 'Ready');
+          break;
+
+        case 'run_error':
+          if (pendingBubble) {
+            pendingBubble.remove();
+            pendingBubble = null;
+            activityFeed = null;
+          }
+          addMessage('Error: ' + (msg.error || 'Something went wrong'), 'assistant');
+          isProcessing = false;
+          setStatus('error', 'Error');
+          break;
+
+        case 'proactive':
+          addMessage(msg.text, 'assistant');
+          showToast('New message from Cal');
+          break;
+
+        case 'error':
+          console.warn('[WS] Server error:', msg.error);
+          break;
+      }
+    }
+
+    function renderHistory(data) {
+      clearMessages();
+      let dividerInserted = false;
+      for (const message of data.messages || []) {
+        if (!dividerInserted && !message.preReset) {
+          const hasPreReset = (data.messages || []).some(m => m.preReset);
+          if (hasPreReset) {
+            const divider = document.createElement('div');
+            divider.className = 'session-divider';
+            divider.textContent = 'session refreshed';
+            messagesEl.appendChild(divider);
+          }
+          dividerInserted = true;
+        }
+        addMessage(message.content, message.role, { preReset: message.preReset });
+      }
+      const visibleCount = (data.messages || []).length;
+      setStatus('online', visibleCount ? visibleCount + ' messages' : 'Ready');
+    }
+
+    // --- Send Message ---
+    function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+      if (isProcessing) {
+        // Steering: send as steer event while Cal is working
+        wsSend({ type: 'steer', text });
+        addMessage(text, 'user');
+        input.value = '';
+        autoSizeInput();
+        showToast('Steering sent');
+        return;
+      }
+
+      addMessage(text, 'user');
+      input.value = '';
+      autoSizeInput();
+
+      const sent = wsSend({ type: 'message', text });
+      if (!sent) {
+        // Fallback to HTTP if WebSocket not connected
+        sendMessageHttp(text);
+        return;
+      }
+    }
+
+    async function sendMessageHttp(text) {
+      isProcessing = true;
+      input.disabled = true;
+      setStatus('busy', 'Thinking');
+      const loading = addMessage('Cal is thinking...', 'assistant', { pending: true });
+
+      try {
+        let response = await fetch(apiUrl('/api/chat/send'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ message: text }),
         });
+        if (response.status === 404) {
+          response = await fetch(apiUrl('/'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ message: text }),
+          });
+        }
+        const data = await readJsonResponse(response, 'Could not send message');
+        loading.remove();
+        addMessage(data.message || 'No response', 'assistant');
+        setStatus('online', 'Ready');
+      } catch (error) {
+        loading.remove();
+        addMessage('Error: ' + (error.message || 'Could not reach Cal'), 'assistant');
+        setStatus('error', 'Offline');
+      } finally {
+        isProcessing = false;
+        input.disabled = false;
+        autoSizeInput();
+        input.focus({ preventScroll: true });
+      }
+    }
 
-        function addMessage(text, role) {
-            const div = document.createElement('div');
-            div.className = `message ${role}`;
+    // --- Utilities ---
+    function escapeHtml(value) {
+      const div = document.createElement('div');
+      div.textContent = value || '';
+      return div.innerHTML;
+    }
 
-            if (role === 'assistant') {
-                // Render markdown for assistant messages
-                div.innerHTML = marked.parse(text);
-            } else {
-                // Plain text for user messages
-                div.textContent = text;
+    function renderInlineMarkdown(value) {
+      return value
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    }
+
+    function renderMarkdown(text) {
+      const escaped = escapeHtml(text).replace(/\r\n/g, '\n');
+      const blocks = [];
+      let inCode = false;
+      let codeLines = [];
+      let listLines = [];
+      let tableRows = [];
+      let paragraph = [];
+
+      function flushParagraph() {
+        if (paragraph.length) {
+          blocks.push('<p>' + renderInlineMarkdown(paragraph.join(' ')) + '</p>');
+          paragraph = [];
+        }
+      }
+
+      function flushList() {
+        if (listLines.length) {
+          const hasTasks = listLines.some(item => item.task);
+          const className = hasTasks ? ' class="task-list"' : '';
+          blocks.push('<ul' + className + '>' + listLines.map(item => {
+            if (!item.task) {
+              return '<li>' + renderInlineMarkdown(item.text) + '</li>';
             }
 
-            messages.appendChild(div);
-            messages.scrollTop = messages.scrollHeight;
+            const mark = item.checked ? 'x' : '';
+            return '<li><span class="task-box">' + mark + '</span><span>' + renderInlineMarkdown(item.text) + '</span></li>';
+          }).join('') + '</ul>');
+          listLines = [];
+        }
+      }
+
+      function isTableLine(line) {
+        return line.includes('|') && !line.startsWith('&gt; ');
+      }
+
+      function isTableDivider(line) {
+        return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+      }
+
+      function tableCells(line) {
+        return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+      }
+
+      function flushTable() {
+        if (!tableRows.length) return;
+
+        if (tableRows.length >= 2 && isTableDivider(tableRows[1])) {
+          const headers = tableCells(tableRows[0]);
+          const bodyRows = tableRows.slice(2).map(tableCells);
+          const thead = '<thead><tr>' + headers.map(cell => '<th>' + renderInlineMarkdown(cell) + '</th>').join('') + '</tr></thead>';
+          const tbody = '<tbody>' + bodyRows.map(row => (
+            '<tr>' + row.map(cell => '<td>' + renderInlineMarkdown(cell) + '</td>').join('') + '</tr>'
+          )).join('') + '</tbody>';
+          blocks.push('<div class="table-wrap"><table>' + thead + tbody + '</table></div>');
+        } else {
+          for (const row of tableRows) {
+            paragraph.push(row);
+          }
         }
 
-        async function sendMessage() {
-            const text = input.value.trim();
-            if (!text) return;
+        tableRows = [];
+      }
 
-            addMessage(text, 'user');
-            input.value = '';
-            sendBtn.disabled = true;
+      for (const rawLine of escaped.split('\n')) {
+        const line = rawLine.trimEnd();
 
-            const loading = document.createElement('div');
-            loading.className = 'message assistant loading';
-            loading.textContent = 'Cal is thinking...';
-            messages.appendChild(loading);
-
-            try {
-                const res = await fetch('/', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text })
-                });
-                const data = await res.json();
-                loading.remove();
-                addMessage(data.message || 'No response', 'assistant');
-            } catch (err) {
-                loading.remove();
-                addMessage('Error: ' + err.message, 'assistant');
-            }
-
-            sendBtn.disabled = false;
-            input.focus();
+        if (line.startsWith('```')) {
+          if (inCode) {
+            blocks.push('<pre><code>' + codeLines.join('\n') + '</code></pre>');
+            codeLines = [];
+            inCode = false;
+          } else {
+            flushParagraph();
+            flushList();
+            flushTable();
+            inCode = true;
+          }
+          continue;
         }
 
-        sendBtn.addEventListener('click', sendMessage);
-        input.addEventListener('keypress', e => {
-            if (e.key === 'Enter') sendMessage();
+        if (inCode) {
+          codeLines.push(line);
+          continue;
+        }
+
+        if (!line.trim()) {
+          flushParagraph();
+          flushList();
+          flushTable();
+          continue;
+        }
+
+        if (isTableLine(line)) {
+          flushParagraph();
+          flushList();
+          tableRows.push(line);
+          continue;
+        }
+
+        const heading = line.match(/^(#{1,3})\s+(.+)$/);
+        if (heading) {
+          flushParagraph();
+          flushList();
+          flushTable();
+          const level = heading[1].length;
+          blocks.push('<h' + level + '>' + renderInlineMarkdown(heading[2]) + '</h' + level + '>');
+          continue;
+        }
+
+        const bullet = line.match(/^[-*]\s+(\[[ xX]\]\s+)?(.+)$/);
+        if (bullet) {
+          flushParagraph();
+          flushTable();
+          listLines.push({
+            task: Boolean(bullet[1]),
+            checked: /\[[xX]\]/.test(bullet[1] || ''),
+            text: bullet[2],
+          });
+          continue;
+        }
+
+        if (line.startsWith('&gt; ')) {
+          flushParagraph();
+          flushList();
+          flushTable();
+          blocks.push('<blockquote>' + renderInlineMarkdown(line.slice(5)) + '</blockquote>');
+          continue;
+        }
+
+        flushList();
+        flushTable();
+        paragraph.push(line);
+      }
+
+      flushParagraph();
+      flushList();
+      flushTable();
+
+      if (inCode) {
+        blocks.push('<pre><code>' + codeLines.join('\n') + '</code></pre>');
+      }
+
+      return blocks.join('');
+    }
+
+    function setStatus(kind, text) {
+      statusDot.className = 'status-dot ' + kind;
+      statusText.textContent = text;
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function apiUrl(path) {
+      return API_ORIGIN + path;
+    }
+
+    async function readJsonResponse(response, fallbackMessage) {
+      const text = await response.text();
+
+      if (!response.ok) {
+        const detail = text.trim() || response.statusText || fallbackMessage;
+        throw new Error(detail);
+      }
+
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(fallbackMessage + ': server returned non-JSON text');
+      }
+    }
+
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function setEmptyVisible(isVisible) {
+      emptyState.hidden = !isVisible;
+    }
+
+    function addMessage(text, role, options = {}) {
+      setEmptyVisible(false);
+      const row = document.createElement('article');
+      row.className = 'message ' + role + (options.pending ? ' pending' : '') + (options.preReset ? ' pre-reset' : '');
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      if (role === 'assistant') {
+        bubble.innerHTML = options.pending ? (text ? escapeHtml(text) : '') : renderMarkdown(text);
+      } else {
+        bubble.textContent = text;
+      }
+
+      row.appendChild(bubble);
+      messagesEl.appendChild(row);
+      scrollToBottom();
+      return row;
+    }
+
+    function clearMessages() {
+      [...messagesEl.querySelectorAll('.message, .session-divider')].forEach(node => node.remove());
+      setEmptyVisible(true);
+    }
+
+    function autoSizeInput() {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 132) + 'px';
+      sendBtn.disabled = input.value.trim().length === 0;
+    }
+
+    // --- Event Listeners ---
+    composer.addEventListener('submit', event => {
+      event.preventDefault();
+      sendMessage();
+    });
+
+    input.addEventListener('input', autoSizeInput);
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+
+    refreshBtn.addEventListener('click', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'sync' }));
+      }
+      showToast('Session refreshed');
+    });
+
+    window.addEventListener('online', () => {
+      setStatus('online', 'Online');
+      wsConnect();
+    });
+
+    window.addEventListener('offline', () => setStatus('error', 'Offline'));
+
+    // Presence: notify Cal when tab visibility changes
+    document.addEventListener('visibilitychange', () => {
+      const status = document.hidden ? 'away' : 'active';
+      wsSend({ type: 'presence', status });
+    });
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const raw = atob(base64);
+      const arr = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+      return arr;
+    }
+
+    async function setupPushNotifications() {
+      if (!('Notification' in window) || !('PushManager' in window)) {
+        console.warn('[Push] Not supported on this browser/context');
+        return;
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        console.warn('[Push] Permission denied or dismissed');
+        return;
+      }
+
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        console.log('[Push] Already subscribed');
+        return;
+      }
+
+      try {
+        const vapidRes = await fetch('/api/push/vapid-public-key');
+        if (!vapidRes.ok) return;
+        const { key } = await vapidRes.json();
+
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(key),
         });
 
-        input.focus();
-    </script>
+        await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sub),
+        });
+        console.log('[Push] Subscribed successfully');
+      } catch (err) {
+        console.warn('[Push] Subscription failed:', err.message);
+      }
+    }
+
+    // On iOS, notification permission must be triggered by user gesture.
+    // On desktop, we can request automatically.
+    function showPushBanner() {
+      if (!('Notification' in window) || !('PushManager' in window)) return;
+      if (Notification.permission === 'granted') {
+        setupPushNotifications();
+        return;
+      }
+      if (Notification.permission === 'denied') return;
+      // Permission not yet decided — request it (works on desktop, not iOS over HTTP)
+      setupPushNotifications();
+    }
+
+    // Run after SW activates
+    navigator.serviceWorker?.ready.then(() => showPushBanner());
+
+    // --- Boot ---
+    wsConnect();
+    autoSizeInput();
+  </script>
 </body>
 </html>

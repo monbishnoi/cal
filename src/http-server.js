@@ -1,5 +1,5 @@
 /**
- * HTTP/A2A Server for Cal Gateway
+ * HTTP Server for Cal Gateway
  *
  * Provides HTTP endpoints for A2A protocol (Agent-to-Agent) and static file serving.
  * Integrates Session Bridge for automatic context preservation.
@@ -12,16 +12,27 @@ import { randomUUID } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { WebSocketServer } from 'ws';
 import {
   performInSessionHandoff,
 } from './session-bridge.js';
 import { getAssistantConfig, getUserName } from './user-config.js';
 
 import { sendMessage as sendIMessage } from './imessage.js';
-import { sendMessage as sendTelegramMessage } from './telegram.js';
+import { initWebPush, getVapidPublicKey, addSubscription, removeSubscription, sendWebPush, getSubscriptionCount } from './web-push.js';
+
+// Optional Telegram module
+let sendTelegramMessage = null;
+try {
+  const telegram = await import('./telegram.js');
+  sendTelegramMessage = telegram.sendMessage;
+} catch {
+  // Telegram not available
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PWA_DIR = join(__dirname, '..', 'clients', 'pwa');
+const HISTORY_LIMIT = 80;
 
 // Default port
 const HTTP_PORT = process.env.CAL_HTTP_PORT || 8080;
@@ -46,6 +57,259 @@ export function setSession(s) {
  */
 export function getSession() {
   return session;
+}
+
+// --- WebSocket Server ---
+
+let wss = null;
+const wsClients = new Set();
+
+/**
+ * Broadcast an event to all connected WebSocket clients.
+ * @param {Object} event - The event object to send (must have a `type` field)
+ */
+export function wsBroadcast(event) {
+  const data = JSON.stringify(event);
+  for (const client of wsClients) {
+    if (client.readyState === 1) client.send(data);
+  }
+}
+
+/**
+ * Check if any WebSocket client is currently connected.
+ */
+export function wsIsConnected() {
+  for (const client of wsClients) {
+    if (client.readyState === 1) return true;
+  }
+  return false;
+}
+
+function handleWsConnection(ws) {
+  console.log(`[WS] Client connected (${wsClients.size + 1} total)`);
+  wsClients.add(ws);
+
+  // Send current status on connect
+  ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
+
+  ws.on('message', (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      ws.send(JSON.stringify({ type: 'error', error: 'Invalid JSON' }));
+      return;
+    }
+    handleWsMessage(msg, ws);
+  });
+
+  ws.on('close', () => {
+    wsClients.delete(ws);
+    console.log(`[WS] Client disconnected (${wsClients.size} remaining)`);
+  });
+
+  ws.on('error', (err) => {
+    console.error('[WS] Connection error:', err.message);
+  });
+}
+
+async function handleWsMessage(msg, ws) {
+  switch (msg.type) {
+    case 'message':
+      await handleWsChatMessage(msg, ws);
+      break;
+
+    case 'sync':
+      handleWsSync(msg, ws);
+      break;
+
+    case 'typing':
+    case 'presence':
+      // Acknowledged, no action needed yet (future: route to proactive logic)
+      break;
+
+    case 'steer':
+      handleWsSteer(msg);
+      break;
+
+    default:
+      ws.send(JSON.stringify({ type: 'error', error: `Unknown message type: ${msg.type}` }));
+  }
+}
+
+async function handleWsChatMessage(msg, ws) {
+  const userMessage = msg.text;
+  if (!userMessage || !userMessage.trim()) {
+    ws.send(JSON.stringify({ type: 'run_error', error: 'Empty message' }));
+    return;
+  }
+
+  const currentSession = getSession();
+  if (!currentSession) {
+    ws.send(JSON.stringify({ type: 'run_error', error: 'No active session' }));
+    return;
+  }
+
+  const runId = `run-${randomUUID().slice(0, 8)}`;
+
+  // Emit run_started
+  wsBroadcast({ type: 'run_started', runId });
+  wsBroadcast({ type: 'status', state: 'processing' });
+
+  try {
+    const result = await currentSession.sendMessage(userMessage, {
+      onToolCall: (toolName, toolInput) => {
+        if (toolName === 'system') {
+          wsBroadcast({ type: 'step_started', runId, tool: 'system', description: toolInput?.status || 'Processing...' });
+          return;
+        }
+        wsBroadcast({ type: 'step_started', runId, tool: toolName, description: describeToolCall(toolName, toolInput) });
+      },
+      onToolResult: (toolName) => {
+        wsBroadcast({ type: 'step_finished', runId, tool: toolName });
+      },
+    });
+
+    const responseText = result.text;
+    const usage = result.usageStatus;
+
+    // Session Bridge: check if handoff needed
+    if (usage.thresholdHandoff && !usage.handoffTriggered) {
+      console.log('[WS] Session Bridge: 90% threshold reached, performing in-session handoff');
+      await performInSessionHandoff(currentSession);
+      currentSession.reset();
+      console.log('[WS] Session Bridge: Session reset after handoff');
+    }
+
+    // Emit completed response
+    const messageId = `msg-${Date.now()}`;
+    wsBroadcast({ type: 'text_done', runId, fullText: responseText, messageId });
+    wsBroadcast({ type: 'run_finished', runId });
+    wsBroadcast({ type: 'status', state: 'idle' });
+
+  } catch (err) {
+    console.error('[WS] Error processing message:', err.message);
+    wsBroadcast({ type: 'run_error', runId, error: err.message });
+    wsBroadcast({ type: 'status', state: 'idle' });
+  }
+}
+
+function handleWsSync(msg, ws) {
+  const limit = HISTORY_LIMIT;
+  const history = getHydratableHistory(limit);
+  ws.send(JSON.stringify({ type: 'history', ...history }));
+}
+
+function handleWsSteer(msg) {
+  const text = msg.text?.trim();
+  if (!text) return;
+
+  const currentSession = getSession();
+  if (!currentSession) return;
+
+  currentSession.addSteer(text);
+  wsBroadcast({ type: 'steer_ack', text });
+}
+
+/**
+ * Generate a human-readable description for a tool call.
+ * Derives description from tool name + input context automatically.
+ */
+function describeToolCall(toolName, input) {
+  // Convert underscores to spaces
+  let name = toolName.replace(/_/g, ' ');
+
+  // Capitalize first letter
+  name = name.charAt(0).toUpperCase() + name.slice(1);
+
+  // Add context from input if available
+  const context = input?.query || input?.command?.substring(0, 50) || input?.path?.split('/').pop() || input?.filename || input?.title || input?.timeframe || '';
+
+  return context ? `${name}: ${context}` : name;
+}
+
+function stripInjectedContext(text) {
+  return text
+    .replace(/^\*\*.+?\*\* at \*\*.+?\*\*\n\n/s, '')
+    .replace(/^\[SYSTEM:[\s\S]*?\]\n\n?/i, '')
+    .trim();
+}
+
+function getTextContent(content) {
+  let text = '';
+
+  if (typeof content === 'string') {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content
+      .filter(part => part?.type === 'text' && typeof part.text === 'string')
+      .map(part => part.text)
+      .join('\n');
+  }
+
+  if (text.trim().startsWith('[SYSTEM:')) {
+    return '';
+  }
+
+  return stripInjectedContext(text);
+}
+
+function getHydratableHistory(limit = HISTORY_LIMIT) {
+  const currentSession = getSession();
+
+  if (!currentSession) {
+    return {
+      sessionId: null,
+      messages: [],
+      messageCount: 0,
+      usageStatus: null,
+      lastActivity: null,
+    };
+  }
+
+  const visualHistory = (currentSession.visualHistory || []).map((msg, i) => ({
+    ...msg, _preReset: true, _index: i,
+  }));
+  const currentMessages = currentSession.messages.map((msg, i) => ({
+    ...msg, _preReset: false, _index: i,
+  }));
+  const allMessages = [...visualHistory, ...currentMessages];
+
+  const messages = allMessages
+    .map((message) => {
+      const content = getTextContent(message.content);
+      if (!content) return null;
+
+      return {
+        id: `${currentSession.sessionId}-${message._preReset ? 'hist' : 'msg'}-${message._index}`,
+        role: message.role,
+        content,
+        preReset: message._preReset,
+      };
+    })
+    .filter(Boolean)
+    .slice(-limit);
+
+  return {
+    sessionId: currentSession.sessionId,
+    messages,
+    messageCount: currentSession.messages.length,
+    usageStatus: currentSession.getUsageStatus?.() || null,
+    lastActivity: Date.now(),
+  };
+}
+
+function handleSessionHistory(url, res) {
+  const limitParam = Number.parseInt(url.searchParams.get('limit'), 10);
+  const limit = Number.isFinite(limitParam)
+    ? Math.min(Math.max(limitParam, 1), 200)
+    : HISTORY_LIMIT;
+
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+  });
+  res.end(JSON.stringify(getHydratableHistory(limit)));
 }
 
 /**
@@ -176,10 +440,7 @@ async function handleMessageSend(rpcRequest, res) {
 }
 
 /**
- * Handle A2A / direct agent-request
- * Supports both:
- * 1. Standard A2A JSON-RPC (method: "message/send")
- * 2. Simple direct format ({message, contextId})
+ * Handle A2A agent-request (standard JSON-RPC)
  */
 async function handleA2ARequest(req, res) {
   // Read request body
@@ -202,9 +463,8 @@ async function handleA2ARequest(req, res) {
     return;
   }
 
-  // Detect request format
+  // Standard A2A JSON-RPC format
   if (parsedBody.jsonrpc === '2.0' && parsedBody.method) {
-    // Standard A2A JSON-RPC format
     console.log(`[A2A] JSON-RPC request: ${parsedBody.method} (id: ${parsedBody.id})`);
 
     switch (parsedBody.method) {
@@ -230,68 +490,11 @@ async function handleA2ARequest(req, res) {
         }));
     }
   } else {
-    // Simple direct format: { message: "...", contextId: "..." }
-    console.log(`[HTTP] Direct request format detected`);
-    await handleDirectRequest(parsedBody, res);
-  }
-}
-
-/**
- * Handle simple direct request format.
- */
-async function handleDirectRequest(requestBody, res) {
-  const userMessage = requestBody.message || requestBody.Message || '';
-  const contextId = requestBody.contextId || requestBody.contextID || `http-${randomUUID()}`;
-
-  if (!userMessage) {
+    // Unknown format
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      message: 'Error: No message provided',
-      type: 'finalAnswer',
-      contextId,
-    }));
-    return;
-  }
-
-  console.log(`[HTTP] Processing: "${userMessage.substring(0, 50)}..." (context: ${contextId})`);
-
-  // Use shared session (set by gateway.js)
-  const session = getSession();
-
-  try {
-    // Send to Claude and get response
-    const result = await session.sendMessage(userMessage);
-
-    // Session Bridge: Check if handoff needed
-    let responseText = result.text;
-    const usage = result.usageStatus;
-
-    if (usage.thresholdHandoff && !usage.handoffTriggered) {
-      console.log(`[HTTP] Session Bridge: 90% threshold reached, performing in-session handoff`);
-      await performInSessionHandoff(session);
-      session.reset();
-      console.log(`[HTTP] Session Bridge: Session reset after handoff`);
-      responseText += '\n\n---\nSession saved and refreshed. Continuing...';
-    }
-
-    console.log(`[HTTP] Response ready (${responseText.length} chars)`);
-
-    // Return direct response format
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      message: responseText,
-      type: 'finalAnswer',
-      contextId: contextId,
-    }));
-
-  } catch (err) {
-    console.error(`[HTTP] Error processing message:`, err.message);
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      message: `Error: ${err.message}`,
-      type: 'finalAnswer',
-      contextId: contextId,
+      error: 'Unsupported format',
+      message: 'Expected JSON-RPC 2.0 with a method field',
     }));
   }
 }
@@ -322,6 +525,7 @@ async function handleSendMessage(req, res) {
     return;
   }
 
+  // Use direct imports (bypass channelSenders registration)
   let sender;
   if (channel === 'telegram') {
     sender = sendTelegramMessage;
@@ -350,7 +554,7 @@ async function handleSendMessage(req, res) {
 /**
  * Handle HTTP requests
  */
-function handleHttpRequest(req, res) {
+async function handleHttpRequest(req, res) {
   console.log(`[HTTP] ${req.method} ${req.url}`);
 
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -382,6 +586,12 @@ function handleHttpRequest(req, res) {
     return;
   }
 
+  // API: clearer chat endpoint alias for the web UI.
+  if (pathname === '/api/chat/send' && req.method === 'POST') {
+    handleA2ARequest(req, res);
+    return;
+  }
+
   // Health check
   if (pathname === '/health' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -389,9 +599,74 @@ function handleHttpRequest(req, res) {
     return;
   }
 
+  // API: Hydrate the web UI with the current shared session.
+  if ((pathname === '/api/chat/history' || pathname === '/api/session/history') && req.method === 'GET') {
+    handleSessionHistory(url, res);
+    return;
+  }
+
   // API: Send message to channel (used by MCP server)
   if (pathname === '/api/send-message' && req.method === 'POST') {
     handleSendMessage(req, res);
+    return;
+  }
+
+  // Push Notifications API
+  if (pathname === '/api/push/vapid-public-key' && req.method === 'GET') {
+    const key = getVapidPublicKey();
+    if (!key) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'VAPID not configured' }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ key }));
+    }
+    return;
+  }
+
+  if (pathname === '/api/push/subscribe' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const subscription = JSON.parse(body);
+        if (!subscription.endpoint || !subscription.keys) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid subscription object' }));
+          return;
+        }
+        addSubscription(subscription);
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+
+  if (pathname === '/api/push/unsubscribe' && req.method === 'DELETE') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { endpoint } = JSON.parse(body);
+        removeSubscription(endpoint);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+
+  if (pathname === '/api/push/test' && req.method === 'POST') {
+    const result = await sendWebPush({ title: 'Cal', body: 'Test notification — push is working!' });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
     return;
   }
 
@@ -430,7 +705,11 @@ function handleHttpRequest(req, res) {
   // Read and serve file
   try {
     const content = readFileSync(fullPath);
-    res.writeHead(200, { 'Content-Type': contentType });
+    const headers = { 'Content-Type': contentType };
+    if (ext === 'html' || ext === 'js') {
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    }
+    res.writeHead(200, headers);
     res.end(content);
   } catch (err) {
     console.error('[HTTP] Error serving file:', err);
@@ -443,8 +722,24 @@ function handleHttpRequest(req, res) {
  * Start HTTP server
  */
 export async function startHttpServer() {
+  initWebPush();
   return new Promise((resolve, reject) => {
     httpServer = createServer(handleHttpRequest);
+
+    // Attach WebSocket server (upgrade on /ws path)
+    wss = new WebSocketServer({ noServer: true });
+    wss.on('connection', handleWsConnection);
+
+    httpServer.on('upgrade', (req, socket, head) => {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      if (url.pathname === '/ws') {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit('connection', ws, req);
+        });
+      } else {
+        socket.destroy();
+      }
+    });
 
     httpServer.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
@@ -458,6 +753,7 @@ export async function startHttpServer() {
 
     httpServer.listen(HTTP_PORT, HTTP_HOST, () => {
       console.log(`[HTTP] Server listening on http://${HTTP_HOST}:${HTTP_PORT}`);
+      console.log(`[HTTP] WebSocket endpoint: ws://${HTTP_HOST}:${HTTP_PORT}/ws`);
       console.log(`[HTTP] A2A Agent Card: http://${HTTP_HOST}:${HTTP_PORT}/.well-known/agent.json`);
       resolve(httpServer);
     });
@@ -480,11 +776,4 @@ export function stopHttpServer() {
  */
 export function getHttpPort() {
   return HTTP_PORT;
-}
-
-/**
- * Get HTTP host
- */
-export function getHttpHost() {
-  return HTTP_HOST;
 }
