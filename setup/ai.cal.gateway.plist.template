@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.cal.gateway</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string><!-- REPLACE_WITH_CAL_PATH -->/src/gateway.js</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string><!-- REPLACE_WITH_CAL_PATH --></string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string><!-- REPLACE_WITH_HOME_PATH --></string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string><!-- REPLACE_WITH_CAL_PATH -->/logs/gateway.log</string>
+
+    <key>StandardErrorPath</key>
+    <string><!-- REPLACE_WITH_CAL_PATH -->/logs/gateway-error.log</string>
+</dict>
+</plist>
+
+<!--
+Setup Instructions:
+
+1. Copy this file to ~/Library/LaunchAgents/ai.cal.gateway.plist
+
+2. Replace all occurrences of:
+   - REPLACE_WITH_CAL_PATH → Full path to your cal-gateway folder
+   - REPLACE_WITH_HOME_PATH → Your home directory path
+
+3. Create logs directory:
+   mkdir -p /path/to/cal-gateway/logs
+
+4. Load the daemon:
+   launchctl load ~/Library/LaunchAgents/ai.cal.gateway.plist
+
+5. Check status:
+   launchctl list | grep cal
+
+6. View logs:
+   tail -f /path/to/cal-gateway/logs/gateway.log
+
+To stop:
+   launchctl unload ~/Library/LaunchAgents/ai.cal.gateway.plist
+-->

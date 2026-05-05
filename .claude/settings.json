@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node *)",
+      "Bash(npm *)",
+      "Bash(icalBuddy *)",
+      "Bash(shortcuts run *)",
+      "Bash(osascript *)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(memory/*)",
+      "Write(context/*)",
+      "Write(logs/*)",
+      "Write(data/*)"
+    ],
+    "deny": []
+  },
+  "model": "claude-sonnet-4-5"
+}

@@ -1,0 +1,83 @@
+{
+  "jobs": [
+    {
+      "id": "morning-brief",
+      "name": "Morning Brief",
+      "cron": "0 8 * * *",
+      "maxIterations": 20,
+      "prompt": "Generate a concise morning brief. Include today's date, calendar highlights if a calendar tool is configured, urgent action items if any are available, and one relevant news headline if a search tool is configured. Keep it brief and actionable.",
+      "output": "file",
+      "outputPath": "memory/briefs/YYYY-MM-DD-morning.md",
+      "enabled": false
+    },
+    {
+      "id": "news-digest",
+      "name": "News Digest",
+      "cron": "0 13 * * *",
+      "maxIterations": 30,
+      "sessionType": "background",
+      "archiveOutputPath": "memory/news/YYYY-MM-DD-news-digest.md",
+      "prompt": "Generate a short news digest for configured topics. Use available public or configured search tools. Include source URLs, avoid duplicate headlines from recent digest files if available, and keep the output concise. Format for the configured output channel; if output is Telegram, keep the Markdown Telegram-compatible. Do all housekeeping with tools before your final assistant response. The final assistant response must be ONLY the reader-facing digest starting with \"📰 News Digest\". Do not end with an internal completion summary, metadata, or checklist.",
+      "output": "file",
+      "outputPath": "memory/news/YYYY-MM-DD-news-digest.md",
+      "enabled": false
+    },
+    {
+      "id": "eod-brief",
+      "name": "End-of-Day Brief",
+      "cron": "0 20 * * *",
+      "maxIterations": 20,
+      "prompt": "Generate an end-of-day brief. Summarize completed work, carry-over items, and tomorrow's calendar highlights if a calendar tool is configured. Keep it warm, concise, and practical.",
+      "output": "file",
+      "outputPath": "memory/briefs/YYYY-MM-DD-eod.md",
+      "enabled": false
+    },
+    {
+      "id": "consolidate",
+      "name": "Memory Consolidation",
+      "cron": "0 22 * * *",
+      "maxIterations": 25,
+      "sessionType": "background",
+      "prompt": "Review today's local notes if available and extract durable preferences, decisions, active projects, and follow-ups into the configured memory files. Skip duplicates and flag contradictions instead of deleting anything.",
+      "output": "file",
+      "outputPath": "memory/consolidation-log.md",
+      "enabled": false
+    },
+    {
+      "id": "auto-heal-review",
+      "name": "Auto Heal Review",
+      "cron": "0 9 * * 1",
+      "maxIterations": 20,
+      "sessionType": "background",
+      "featureFlag": "autoHeal",
+      "prompt": "Review recent gateway logs and session errors. Identify reproducible failures, likely root causes, and minimal proposed fixes. Do not apply code changes automatically; write a concise repair proposal with commands or files to inspect next.",
+      "output": "file",
+      "outputPath": "memory/auto-heal/YYYY-MM-DD-proposal.md",
+      "enabled": false
+    }
+  ],
+  "settings": {
+    "timezone": "UTC",
+    "logLevel": "info"
+  },
+  "features": {
+    "qmd": {
+      "enabled": false,
+      "httpEndpoint": "",
+      "collections": ["context", "memory", "docs"],
+      "_comment": "Optional. Run setup/qmd-setup.sh to choose a local port and enable QMD."
+    },
+    "autoHeal": {
+      "enabled": false,
+      "mode": "proposal",
+      "_comment": "Optional generic repair review. Disabled by default and proposal-only in the public template."
+    }
+  },
+  "mcpServers": {
+    "qmd": {
+      "endpoint": "",
+      "enabled": false,
+      "description": "Optional local semantic search MCP server. Filled by setup/qmd-setup.sh."
+    }
+  }
+}

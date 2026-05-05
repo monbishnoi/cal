@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "allowedSender": "+15551234567",
+  "calIdentity": "your.email@icloud.com",
+  "watchChatId": "YOUR_CHAT_ID",
+  "service": "imessage"
+}

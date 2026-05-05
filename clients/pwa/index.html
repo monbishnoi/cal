@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cal</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Cal">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="manifest" href="manifest.json">
+    <!-- Inter font for better readability -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-weight: 400;
+            background: #1a1a2e;
+            color: #e8e8ed;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-size: 15px;
+            line-height: 1.6;
+            letter-spacing: -0.01em;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        .header {
+            padding: 16px 20px;
+            background: #16213e;
+            border-bottom: 1px solid #333;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .message {
+            margin-bottom: 16px;
+            max-width: 85%;
+            line-height: 1.65;
+        }
+        .message.user {
+            margin-left: auto;
+            background: #0f3460;
+            padding: 12px 16px;
+            border-radius: 18px 18px 4px 18px;
+        }
+        .message.assistant {
+            background: #1f1f3a;
+            padding: 16px 20px;
+            border-radius: 18px 18px 18px 4px;
+            color: #d8d8dc;
+        }
+
+        /* ===== Markdown Styling for Assistant Messages ===== */
+        .message.assistant h1,
+        .message.assistant h2,
+        .message.assistant h3,
+        .message.assistant h4 {
+            color: #b388ff;
+            font-weight: 600;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+            line-height: 1.3;
+        }
+        .message.assistant h1:first-child,
+        .message.assistant h2:first-child,
+        .message.assistant h3:first-child {
+            margin-top: 0;
+        }
+        .message.assistant h1 { font-size: 1.4em; }
+        .message.assistant h2 { font-size: 1.2em; }
+        .message.assistant h3 { font-size: 1.1em; }
+        .message.assistant h4 { font-size: 1em; }
+
+        .message.assistant p {
+            margin-bottom: 0.75em;
+        }
+        .message.assistant p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message.assistant ul,
+        .message.assistant ol {
+            margin: 0.5em 0 0.75em 1.5em;
+            padding: 0;
+        }
+        .message.assistant li {
+            margin-bottom: 0.35em;
+        }
+        .message.assistant li:last-child {
+            margin-bottom: 0;
+        }
+
+        .message.assistant strong {
+            color: #e8e8ed;
+            font-weight: 600;
+        }
+
+        .message.assistant em {
+            color: #a8a8b0;
+            font-style: italic;
+        }
+
+        .message.assistant a {
+            color: #b388ff;
+            text-decoration: none;
+        }
+        .message.assistant a:hover {
+            text-decoration: underline;
+        }
+
+        .message.assistant code {
+            font-family: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+            font-size: 0.9em;
+            background: #2a2a4a;
+            padding: 0.15em 0.4em;
+            border-radius: 4px;
+            color: #e8b4ff;
+        }
+
+        .message.assistant pre {
+            background: #12121f;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 0.75em 0;
+            overflow-x: auto;
+        }
+        .message.assistant pre code {
+            background: none;
+            padding: 0;
+            font-size: 0.85em;
+            line-height: 1.5;
+            color: #c8c8d0;
+        }
+
+        .message.assistant blockquote {
+            border-left: 3px solid #9c27b0;
+            padding-left: 12px;
+            margin: 0.75em 0;
+            color: #a8a8b0;
+            font-style: italic;
+        }
+
+        .message.assistant table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.75em 0;
+            font-size: 0.9em;
+        }
+        .message.assistant th,
+        .message.assistant td {
+            padding: 8px 12px;
+            border: 1px solid #3a3a5a;
+            text-align: left;
+        }
+        .message.assistant th {
+            background: #2a2a4a;
+            color: #b388ff;
+            font-weight: 600;
+        }
+        .message.assistant tr:hover td {
+            background: #25253d;
+        }
+
+        .message.assistant hr {
+            border: none;
+            border-top: 1px solid #3a3a5a;
+            margin: 1em 0;
+        }
+
+        /* ===== Input Area ===== */
+        .input-area {
+            padding: 12px 16px;
+            background: #16213e;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 8px;
+        }
+        #input {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 24px;
+            background: #1a1a2e;
+            color: #e8e8ed;
+            font-family: inherit;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+        #input:focus { outline: 2px solid #0f3460; }
+        #input::placeholder { color: #666; }
+        #send {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 24px;
+            background: #9c27b0;
+            color: white;
+            font-family: inherit;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #send:hover { background: #7b1fa2; }
+        #send:disabled { opacity: 0.5; }
+        .loading { opacity: 0.6; font-style: italic; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Cal</h1>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+        <input type="text" id="input" placeholder="Message Cal..." autocomplete="off">
+        <button id="send">Send</button>
+    </div>
+
+    <script>
+        const messages = document.getElementById('messages');
+        const input = document.getElementById('input');
+        const sendBtn = document.getElementById('send');
+
+        // Configure marked for safe rendering
+        marked.setOptions({
+            breaks: true,      // Convert \n to <br>
+            gfm: true,         // GitHub Flavored Markdown
+            headerIds: false,  // Don't add IDs to headers
+            mangle: false      // Don't mangle email addresses
+        });
+
+        function addMessage(text, role) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+
+            if (role === 'assistant') {
+                // Render markdown for assistant messages
+                div.innerHTML = marked.parse(text);
+            } else {
+                // Plain text for user messages
+                div.textContent = text;
+            }
+
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const text = input.value.trim();
+            if (!text) return;
+
+            addMessage(text, 'user');
+            input.value = '';
+            sendBtn.disabled = true;
+
+            const loading = document.createElement('div');
+            loading.className = 'message assistant loading';
+            loading.textContent = 'Cal is thinking...';
+            messages.appendChild(loading);
+
+            try {
+                const res = await fetch('/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+                const data = await res.json();
+                loading.remove();
+                addMessage(data.message || 'No response', 'assistant');
+            } catch (err) {
+                loading.remove();
+                addMessage('Error: ' + err.message, 'assistant');
+            }
+
+            sendBtn.disabled = false;
+            input.focus();
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        input.addEventListener('keypress', e => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        input.focus();
+    </script>
+</body>
+</html>
