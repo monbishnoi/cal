@@ -1,7 +1,8 @@
 /**
- * HTTP Server for Cal Gateway
+ * HTTP/A2A Server for Cal Gateway
  *
  * Provides HTTP endpoints for A2A protocol (Agent-to-Agent) and static file serving.
+ * Enables Joule to call Cal via JSON-RPC.
  * Integrates Session Bridge for automatic context preservation.
  *
  * Session is owned by gateway.js and passed via setSession().
@@ -17,6 +18,7 @@ import {
   performInSessionHandoff,
 } from './session-bridge.js';
 import { getAssistantConfig, getUserName } from './user-config.js';
+import { handleCommand } from './commands.js';
 
 import { sendMessage as sendIMessage } from './imessage.js';
 import { initWebPush, getVapidPublicKey, addSubscription, removeSubscription, sendWebPush, getSubscriptionCount } from './web-push.js';
@@ -28,6 +30,74 @@ try {
   sendTelegramMessage = telegram.sendMessage;
 } catch {
   // Telegram not available
+}
+
+// OAuth callback handler — set by jira-oauth-provider when auth is in progress
+let oauthCallbackHandler = null;
+
+/**
+ * Register an OAuth callback handler.
+ * Called by gateway.js when setting up Jira MCP auth.
+ * @param {Function} handler - function(authorizationCode) to call when callback is received
+ */
+export function setOAuthCallbackHandler(handler) {
+  oauthCallbackHandler = handler;
+}
+
+/**
+ * Handle OAuth callback from browser redirect.
+ * Extracts the authorization code and passes it to the registered handler.
+ */
+function handleOAuthCallback(url, res) {
+  const code = url.searchParams.get('code');
+  const error = url.searchParams.get('error');
+
+  if (error) {
+    console.error(`[OAuth] Authorization error: ${error}`);
+    res.writeHead(400, { 'Content-Type': 'text/html' });
+    res.end(`
+      <html><body>
+        <h1>Authorization Failed</h1>
+        <p>Error: ${error}</p>
+        <p>${url.searchParams.get('error_description') || ''}</p>
+        <p>You can close this window.</p>
+      </body></html>
+    `);
+    return;
+  }
+
+  if (!code) {
+    console.error('[OAuth] No authorization code in callback');
+    res.writeHead(400, { 'Content-Type': 'text/html' });
+    res.end(`
+      <html><body>
+        <h1>Missing Authorization Code</h1>
+        <p>No code parameter received. Please try again.</p>
+      </body></html>
+    `);
+    return;
+  }
+
+  console.log(`[OAuth] Authorization code received: ${code.substring(0, 10)}...`);
+
+  // Send success page to browser
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <html><body>
+      <h1>✅ Authorization Successful</h1>
+      <p>Cal Gateway has been authorized to access SAP Jira.</p>
+      <p>You can close this window and return to your chat.</p>
+      <script>setTimeout(() => window.close(), 3000);</script>
+    </body></html>
+  `);
+
+  // Deliver the code to the waiting auth flow
+  if (oauthCallbackHandler) {
+    oauthCallbackHandler(code);
+    oauthCallbackHandler = null; // One-time use
+  } else {
+    console.warn('[OAuth] Received callback but no handler registered');
+  }
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -150,6 +220,17 @@ async function handleWsChatMessage(msg, ws) {
     return;
   }
 
+  // Unified command handler (shared with Telegram/iMessage)
+  const cmdResult = handleCommand(userMessage, currentSession);
+  if (cmdResult) {
+    const cmdRunId = `cmd-${Date.now()}`;
+    wsBroadcast({ type: 'run_started', runId: cmdRunId });
+    wsBroadcast({ type: 'text_done', runId: cmdRunId, fullText: cmdResult.response, messageId: `msg-${Date.now()}` });
+    wsBroadcast({ type: 'run_finished', runId: cmdRunId });
+    wsBroadcast({ type: 'status', state: 'idle' });
+    return;
+  }
+
   const runId = `run-${randomUUID().slice(0, 8)}`;
 
   // Emit run_started
@@ -216,8 +297,10 @@ function handleWsSteer(msg) {
  * Derives description from tool name + input context automatically.
  */
 function describeToolCall(toolName, input) {
-  // Convert underscores to spaces
-  let name = toolName.replace(/_/g, ' ');
+  // Strip common prefixes
+  let name = toolName
+    .replace(/^(jira|teams|genai|qmd|sap)_/, '')
+    .replace(/_/g, ' ');
 
   // Capitalize first letter
   name = name.charAt(0).toUpperCase() + name.slice(1);
@@ -440,7 +523,10 @@ async function handleMessageSend(rpcRequest, res) {
 }
 
 /**
- * Handle A2A agent-request (standard JSON-RPC)
+ * Handle A2A / Joule agent-request
+ * Supports both:
+ * 1. Standard A2A JSON-RPC (method: "message/send")
+ * 2. Joule's simpler format (direct {message, contextId} body)
  */
 async function handleA2ARequest(req, res) {
   // Read request body
@@ -463,8 +549,9 @@ async function handleA2ARequest(req, res) {
     return;
   }
 
-  // Standard A2A JSON-RPC format
+  // Detect request format
   if (parsedBody.jsonrpc === '2.0' && parsedBody.method) {
+    // Standard A2A JSON-RPC format
     console.log(`[A2A] JSON-RPC request: ${parsedBody.method} (id: ${parsedBody.id})`);
 
     switch (parsedBody.method) {
@@ -490,11 +577,70 @@ async function handleA2ARequest(req, res) {
         }));
     }
   } else {
-    // Unknown format
+    // Joule's simpler format: { message: "...", contextId: "..." }
+    console.log(`[A2A] Joule direct request format detected`);
+    await handleJouleDirectRequest(parsedBody, res);
+  }
+}
+
+/**
+ * Handle Joule's direct agent-request format
+ * Joule sends: { message: "user text", contextId: "optional" }
+ * Joule expects: { message: "response text", type: "finalAnswer", contextId: "..." }
+ */
+async function handleJouleDirectRequest(requestBody, res) {
+  const userMessage = requestBody.message || requestBody.Message || '';
+  const contextId = requestBody.contextId || requestBody.contextID || `joule-${randomUUID()}`;
+
+  if (!userMessage) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      error: 'Unsupported format',
-      message: 'Expected JSON-RPC 2.0 with a method field',
+      message: 'Error: No message provided',
+      type: 'finalAnswer',
+      contextId,
+    }));
+    return;
+  }
+
+  console.log(`[Joule] Processing: "${userMessage.substring(0, 50)}..." (context: ${contextId})`);
+
+  // Use shared session (set by gateway.js)
+  const session = getSession();
+
+  try {
+    // Send to Claude and get response
+    const result = await session.sendMessage(userMessage);
+
+    // Session Bridge: Check if handoff needed
+    let responseText = result.text;
+    const usage = result.usageStatus;
+
+    if (usage.thresholdHandoff && !usage.handoffTriggered) {
+      console.log(`[Joule] Session Bridge: 90% threshold reached, performing in-session handoff`);
+      await performInSessionHandoff(session);
+      session.reset();
+      console.log(`[Joule] Session Bridge: Session reset after handoff`);
+      responseText += '\n\n---\nSession saved and refreshed. Continuing...';
+    }
+
+    console.log(`[Joule] Response ready (${responseText.length} chars)`);
+
+    // Return in Joule's expected format
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      message: responseText,
+      type: 'finalAnswer',
+      contextId: contextId,
+    }));
+
+  } catch (err) {
+    console.error(`[Joule] Error processing message:`, err.message);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      message: `Error: ${err.message}`,
+      type: 'finalAnswer',
+      contextId: contextId,
     }));
   }
 }
@@ -667,6 +813,12 @@ async function handleHttpRequest(req, res) {
     const result = await sendWebPush({ title: 'Cal', body: 'Test notification — push is working!' });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
+    return;
+  }
+
+  // OAuth callback (receives authorization code from browser redirect)
+  if (pathname === '/oauth/callback' && req.method === 'GET') {
+    handleOAuthCallback(url, res);
     return;
   }
 

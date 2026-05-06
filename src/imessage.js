@@ -3,8 +3,9 @@
  *
  * Handles incoming iMessages and routes them through CalSession.
  * Uses imsg CLI to read from Messages database and send via AppleScript.
- * Same shared session as Telegram, HTTP, and scheduled jobs.
+ * Same shared session as Telegram, Joule, and scheduled jobs.
  * Integrates Session Bridge for automatic context preservation.
+ * Integrates AutoHeal for consent prompts and commands.
  *
  * Session is owned by gateway.js and passed via setSession().
  *
@@ -18,22 +19,26 @@
  * Architecture: imsg watch (polls chat.db) -> new message -> CalSession -> response -> imsg send
  */
 
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { deleteSession } from './session-store.js';
-import { loadSkills, getSkillPrompt, getSkillNames, hasSkill } from './skills.js';
-import { checkMacFeature, getCommandPath, isCommandAvailable } from './detect.js';
+import { loadSkills, getSkillPrompt, getSkillNames, hasSkill, getSkillExecutionOptions } from './skills.js';
 import {
   performInSessionHandoff,
 } from './session-bridge.js';
-import { getIMessageConfig, getMainSessionId } from './user-config.js';
+import {
+  isConsentResponse,
+  handleConsentResponse,
+  isAutoHealCommand,
+  handleAutoHealCommand,
+} from './autoheal.js';
+import { getIMessageConfig } from './user-config.js';
+import { handleCommand } from './commands.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(__dirname, '../config/imessage.json');
-const DEFAULT_IMSG_PATH = '/opt/homebrew/bin/imsg';
-let imsgPath = process.env.IMSG_PATH || DEFAULT_IMSG_PATH;
+const IMSG_PATH = '/opt/homebrew/bin/imsg';
 
 // Session (set by gateway via setSession())
 let session = null;
@@ -111,14 +116,6 @@ export async function startIMessage() {
     return null;
   }
 
-  const platformCheck = checkMacFeature('iMessage', 'imsg');
-  if (platformCheck) {
-    console.log(`[iMessage] Disabled: ${platformCheck.error}`);
-    return null;
-  }
-
-  imsgPath = process.env.IMSG_PATH || getCommandPath('imsg') || DEFAULT_IMSG_PATH;
-
   if (!config.allowedSender) {
     console.error('[iMessage] allowedSender not set in config — cannot start');
     return null;
@@ -157,7 +154,7 @@ function startWatching() {
   isRunning = true;
 
   // Spawn imsg watch as a child process
-  watchProcess = spawn(imsgPath, [
+  watchProcess = spawn(IMSG_PATH, [
     'watch',
     '--chat-id', config.watchChatId,
     '--json',
@@ -254,40 +251,81 @@ async function handleIncoming(message) {
   console.log(`[iMessage] Received: "${text.substring(0, 80)}${text.length > 80 ? '...' : ''}"`);
 
   try {
-    // Handle commands
-    if (text.toLowerCase() === '/reset') {
-      const sessionId = getMainSessionId();
-      deleteSession(sessionId);
-      session = null;
-      await sendResponse('Session reset. Starting fresh.');
+    // Check for AutoHeal consent response (yes/no after consent prompt)
+    if (isConsentResponse(text)) {
+      const response = handleConsentResponse(text);
+      await sendResponse(response);
       return;
     }
 
-    if (text.toLowerCase() === '/status') {
-      const s = getSession();
-      const usage = s.getUsageStatus();
-      const sessionId = getMainSessionId();
-      const status = `Cal Gateway\nChannels: Terminal, Telegram, HTTP, iMessage\nSession: ${sessionId}\nSkills: ${getSkillNames().join(', ')}\n\nSession Bridge: ${usage.percentageFormatted} context used`;
-      await sendResponse(status);
-      return;
-    }
-
-    if (text.toLowerCase() === '/restart') {
-      if (!isCommandAvailable('pm2')) {
-        await sendResponse('pm2 not installed. Cannot restart automatically.\nInstall with: npm install -g pm2');
+    // Check for AutoHeal commands (enable/disable self-diagnosis)
+    if (isAutoHealCommand(text)) {
+      const response = handleAutoHealCommand(text);
+      if (response) {
+        await sendResponse(response);
         return;
       }
+    }
 
-      await sendResponse('Restarting Cal Gateway...');
+    // Handle commands
+    const cmdResult = handleCommand(text, getSession());
+    if (cmdResult) {
+      await sendResponse(cmdResult.response);
+      return;
+    }
 
-      // Give time for message to send before restart
-      setTimeout(() => {
-        try {
-          execSync('pm2 restart cal-gateway');
-        } catch (err) {
-          console.error('[iMessage] Failed to restart:', err.message);
+    // Jira OAuth: trigger first-time browser authentication
+    if (text.toLowerCase() === '/jira-auth') {
+      try {
+        const { getJiraOAuthProvider } = await import('./jira-oauth-provider.js');
+        const { getMCPClientManager } = await import('./mcp-client.js');
+        const { setOAuthCallbackHandler } = await import('./http-server.js');
+
+        const provider = getJiraOAuthProvider();
+        const manager = getMCPClientManager();
+
+        // Check if already authenticated
+        if (manager.isConnected('jira') && !manager.hasPendingAuth('jira')) {
+          const tools = manager.getTools('jira');
+          await sendResponse(`✅ Jira is already connected with ${tools.length} tools available.`);
+          return;
         }
-      }, 1000);
+
+        // Check if Jira MCP is even configured
+        if (!manager.hasPendingAuth('jira') && !manager.isConnected('jira')) {
+          await sendResponse('Jira MCP is not configured or failed to initialize. Check jobs.json and Gateway logs.');
+          return;
+        }
+
+        await sendResponse('🔐 Starting Jira OAuth flow...\n\nA browser window will open on your Mac for SAP SSO login. After you log in, the token will be saved automatically.');
+
+        // Set up the callback: when browser redirects back, complete the auth
+        setOAuthCallbackHandler(async (authCode) => {
+          try {
+            console.log('[iMessage] Jira OAuth callback received, completing auth...');
+            await manager.completeAuth('jira', authCode);
+            const tools = manager.getTools('jira');
+            await sendResponse(`✅ Jira authenticated! ${tools.length} tools now available:\n${tools.map(t => '• ' + t.name).join('\n')}`);
+          } catch (err) {
+            console.error('[iMessage] Jira OAuth completion failed:', err.message);
+            await sendResponse(`❌ Jira auth failed: ${err.message}\n\nTry /jira-auth again.`);
+          }
+        });
+
+        // Trigger the connection attempt which will open the browser
+        // (The provider's redirectToAuthorization will open the browser)
+        if (manager.hasPendingAuth('jira')) {
+          // Already attempted once at startup, need to retry the connection
+          const config = (await import('./scheduler.js')).loadJobs();
+          const jiraConfig = config.mcpServers?.jira;
+          if (jiraConfig) {
+            await manager.reconnect('jira', jiraConfig.endpoint, { authProvider: provider });
+          }
+        }
+      } catch (err) {
+        console.error('[iMessage] Jira auth error:', err.message);
+        await sendResponse(`❌ Error: ${err.message}`);
+      }
       return;
     }
 
@@ -297,8 +335,9 @@ async function handleIncoming(message) {
       const skillName = skillMatch[1].toLowerCase();
       if (hasSkill(skillName)) {
         const skillPrompt = getSkillPrompt(skillName);
+        const skillOptions = getSkillExecutionOptions(skillName);
         const s = getSession();
-        const result = await s.sendMessage(skillPrompt);
+        const result = await s.sendMessage(skillPrompt, skillOptions);
 
         // Session Bridge: Check if handoff needed
         let response = result.text;
@@ -376,7 +415,7 @@ function sendImsg(text) {
       '--text', text
     ];
 
-    const proc = spawn(imsgPath, args, {
+    const proc = spawn(IMSG_PATH, args, {
       stdio: ['ignore', 'pipe', 'pipe']
     });
 

@@ -44,6 +44,9 @@ export class CalSession {
     this.messageQueue = Promise.resolve();  // Serialize access to mutable message history
     this.isProcessingMessage = false;
 
+    // Health detection: ring buffer of recent response lengths
+    this.recentResponseLengths = [];
+
     // Steering: queued messages from the user injected between tool iterations
     this.steerQueue = [];
 
@@ -589,6 +592,15 @@ export class CalSession {
 
       console.log(`[Session ${this.sessionId}] Response complete (${finalText.length} chars)`);
 
+      // Health detection: track response and maybe surface a hint
+      this.recentResponseLengths.push(finalText.length);
+      if (this.recentResponseLengths.length > 5) this.recentResponseLengths.shift();
+      const hint = this.getHealthHint();
+      if (hint) {
+        finalText += `\n\n---\n${hint}`;
+        console.log(`[Session ${this.sessionId}] Health hint surfaced`);
+      }
+
       if (onResponse) {
         onResponse(finalText);
       }
@@ -803,7 +815,31 @@ export class CalSession {
     this.tokenUsage = { inputTokens: 0, outputTokens: 0, lastUpdated: null };
     this.handoffTriggered = false;
     this.handoffMessageIndex = null;
+    this.recentResponseLengths = [];
     this.persistToDisk();
+  }
+
+  getHealthHint() {
+    const recent = this.recentResponseLengths;
+    const usage = this.getUsageStatus();
+
+    // 2+ consecutive empty or near-empty responses
+    if (recent.length >= 2) {
+      const lastTwo = recent.slice(-2);
+      if (lastTwo.every(len => len < 20)) {
+        return 'Tip: Cal seems unresponsive. Type /reset to start a fresh session.';
+      }
+    }
+
+    // 3+ very short responses while context is high
+    if (recent.length >= 3 && usage.percentage > 0.7) {
+      const lastThree = recent.slice(-3);
+      if (lastThree.every(len => len < 100)) {
+        return 'Tip: Session context is high and responses are getting short. Type /reset to free up space.';
+      }
+    }
+
+    return null;
   }
 
   extractVisualHistory(limit = 20) {

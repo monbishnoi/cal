@@ -2,24 +2,40 @@
  * Telegram Bot for Cal Gateway
  *
  * Handles incoming Telegram messages and routes them through CalSession.
- * Supports skills loaded from the distributable skills/ directory.
+ * Supports skills loaded from .claude/skills/ directory.
  * Integrates Session Bridge for automatic context preservation.
+ * Integrates AutoHeal for consent prompts and commands.
  *
  * Session is owned by gateway.js and passed via setSession().
  */
 
 import { Telegraf } from 'telegraf';
 import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import { loadSkills, getSkillPrompt, getSkillNames, hasSkill } from './skills.js';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { deleteSession } from './session-store.js';
+import { loadSkills, getSkill, getSkillPrompt, getSkillNames, hasSkill, getSkillExecutionOptions } from './skills.js';
 import {
   performInSessionHandoff,
 } from './session-bridge.js';
+import {
+  isConsentResponse,
+  handleConsentResponse,
+  isAutoHealCommand,
+  handleAutoHealCommand,
+  hasPendingConsentPrompt,
+  clearPendingConsentPrompt,
+  getAutoHealLevel,
+  loadFix,
+} from './autoheal.js';
+import { setConsentPromptCallback } from './logger.js';
+import { performSurgery } from './surgery.js';
 import { CAL_HOME } from './paths.js';
 import { getTelegramConfig, getGreeting, getMainSessionId } from './user-config.js';
-import { isCommandAvailable } from './detect.js';
+import { handleCommand } from './commands.js';
 
-const ENV_PATH = join(CAL_HOME, 'config', '.env');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ENV_PATH = join(CAL_HOME, 'telegram-bot/.env');
 
 let bot = null;
 let session = null;  // Set by gateway via setSession()
@@ -28,12 +44,8 @@ let session = null;  // Set by gateway via setSession()
  * Load Telegram bot token from .env
  */
 function loadBotToken() {
-  if (process.env.TELEGRAM_BOT_TOKEN) {
-    return process.env.TELEGRAM_BOT_TOKEN;
-  }
-
   if (!existsSync(ENV_PATH)) {
-    throw new Error(`TELEGRAM_BOT_TOKEN not found. Set it in your environment or ${ENV_PATH}`);
+    throw new Error(`Telegram .env not found: ${ENV_PATH}`);
   }
 
   const envContent = readFileSync(ENV_PATH, 'utf8');
@@ -66,12 +78,6 @@ export function getSession() {
  * Initialize and start Telegram bot
  */
 export async function startTelegram() {
-  const telegramConfig = getTelegramConfig();
-  if (!telegramConfig.enabled) {
-    console.log('[Telegram] Disabled in config');
-    return null;
-  }
-
   const token = loadBotToken();
 
   // Increase handler timeout from default 90s to 5 minutes
@@ -140,44 +146,18 @@ export async function startTelegram() {
   });
 
   bot.command('reset', (ctx) => {
-    const s = getSession();
-    s.reset();
-    ctx.reply('Session reset. Starting fresh!');
+    const cmdResult = handleCommand('/reset', getSession());
+    ctx.reply(cmdResult.response);
   });
 
-  bot.command('restart', async (ctx) => {
-    // Check if pm2 is available
-    if (!isCommandAvailable('pm2')) {
-      ctx.reply('pm2 not installed. Cannot restart automatically.\nInstall with: npm install -g pm2');
-      return;
-    }
-
-    ctx.reply('Restarting Gateway via pm2... See you in a moment!');
-    // Give time for message to send before restart
-    setTimeout(async () => {
-      try {
-        const { execSync } = await import('child_process');
-        execSync('pm2 restart cal-gateway');
-      } catch (err) {
-        console.error('[Telegram] Restart failed:', err.message);
-      }
-    }, 1000);
+  bot.command('restart', (ctx) => {
+    const cmdResult = handleCommand('/restart', getSession());
+    ctx.reply(cmdResult.response);
   });
 
   bot.command('status', (ctx) => {
-    const s = getSession();
-    const usage = s.getUsageStatus();
-
-    ctx.reply(
-      `*Session Status*\n\n` +
-      `Session ID: \`${s.sessionId}\`\n` +
-      `Messages: ${s.messages.length}\n` +
-      `Initialized: ${s.isInitialized}\n\n` +
-      `*Session Bridge*\n` +
-      `Context: ${usage.percentageFormatted} (${usage.totalTokens.toLocaleString()}/${usage.contextLimit.toLocaleString()} tokens)\n` +
-      `Handoff triggered: ${usage.handoffTriggered ? 'Yes' : 'No'}`,
-      { parse_mode: 'Markdown' }
-    );
+    const cmdResult = handleCommand('/status', getSession());
+    ctx.reply(cmdResult.response);
   });
 
   // Skill handler - catches any /command and checks if it's a skill
@@ -217,6 +197,7 @@ export async function startTelegram() {
     try {
       const s = getSession();
       const skillPrompt = getSkillPrompt(commandName);
+      const skillOptions = getSkillExecutionOptions(commandName);
 
       // Keep typing indicator alive
       const typingInterval = setInterval(() => {
@@ -227,6 +208,7 @@ export async function startTelegram() {
         onToolCall: (name, input) => {
           console.log(`[Telegram] Skill tool call: ${name}`);
         },
+        ...skillOptions,
       });
 
       clearInterval(typingInterval);
@@ -262,6 +244,55 @@ export async function startTelegram() {
     const chatId = ctx.chat.id;
 
     console.log(`[Telegram] Message from ${chatId}: ${message.substring(0, 50)}...`);
+
+    // Check for AutoHeal consent response (yes/no after consent prompt)
+    if (isConsentResponse(message)) {
+      const response = handleConsentResponse(message);
+      await ctx.reply(response);
+      return;
+    }
+
+    // Check for AutoHeal commands (enable/disable self-diagnosis)
+    if (isAutoHealCommand(message)) {
+      const response = handleAutoHealCommand(message);
+      if (response) {
+        await ctx.reply(response);
+        return;
+      }
+    }
+
+    // Check for "apply fix-XXX" command
+    const applyMatch = message.toLowerCase().match(/^apply\s+(fix-\d+)$/);
+    if (applyMatch) {
+      const fixId = applyMatch[1];
+      const fix = loadFix(fixId);
+
+      if (!fix) {
+        await ctx.reply(`Fix not found: ${fixId}`);
+        return;
+      }
+
+      // Check if Level 3 is enabled for automatic surgery
+      const level = getAutoHealLevel();
+      if (level >= 3) {
+        await ctx.reply(`Applying ${fixId}... I'll restart after the fix is applied.`);
+        ctx.sendChatAction('typing');
+
+        const result = await performSurgery(fixId);
+        await ctx.reply(result.message);
+      } else {
+        // Level 2: Show fix details and ask for confirmation
+        await ctx.reply(
+          `*Fix: ${fix.id}*\n\n` +
+          `Root cause: ${fix.rootCause}\n` +
+          `Description: ${fix.description}\n` +
+          `File: ${fix.file}\n\n` +
+          `To apply this fix automatically, enable SELF-SURGERY MODE by replying 'yes' to the diagnosis report, or say 'enable self-surgery'.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+      return;
+    }
 
     // Send "typing" indicator
     ctx.sendChatAction('typing');
@@ -317,6 +348,16 @@ export async function startTelegram() {
   // Start polling
   await bot.launch();
   console.log('[Telegram] Bot started successfully');
+
+  // Set up AutoHeal consent prompt callback
+  setConsentPromptCallback(async (message) => {
+    try {
+      await bot.telegram.sendMessage(getTelegramConfig().chatId, message, { parse_mode: 'Markdown' });
+      console.log('[Telegram] Sent AutoHeal consent prompt');
+    } catch (err) {
+      console.error('[Telegram] Failed to send consent prompt:', err.message);
+    }
+  });
 
   return bot;
 }
