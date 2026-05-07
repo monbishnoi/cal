@@ -13,12 +13,13 @@ import { initSessionStore, flushToDisk } from './session-store.js';
 import { CalSession } from './session.js';
 import { initScheduler, stopScheduler, triggerJob, getJobStatus, loadJobs } from './scheduler.js';
 import { startIMessage, stopIMessage, sendMessage as sendIMessage, setSession as setIMessageSession } from './imessage.js';
-import { startHttpServer, stopHttpServer, getHttpPort, getHttpHost, setSession as setHttpSession, wsBroadcast, wsIsConnected } from './http-server.js';
+import { startHttpServer, stopHttpServer, getHttpPort, getHttpHost, setSession as setHttpSession, registerChannelSender, wsIsConnected } from './http-server.js';
 import { routeOutput } from './output.js';
 import { sendWebPush } from './web-push.js';
+import { publishEvent } from './event-bus.js';
+import { conversationRuntime } from './conversation-runtime.js';
 import { loadSkills, getSkillNames } from './skills.js';
 import { initMCPClients, getMCPClientManager } from './mcp-client.js';
-import { performInSessionHandoff } from './session-bridge.js';
 import { logError, logInfo } from './logger.js';
 import { CAL_HOME } from './paths.js';
 import { getToday } from './context.js';
@@ -67,6 +68,7 @@ let imessageEnabled = false;
 function getMainSession() {
   if (!mainSession) {
     mainSession = new CalSession(MAIN_SESSION_ID);
+    conversationRuntime.setDefaultSession(mainSession);
   }
   return mainSession;
 }
@@ -91,6 +93,7 @@ async function sendNotification(message) {
 function getBackgroundSession() {
   if (!backgroundSession) {
     backgroundSession = new CalSession(BACKGROUND_SESSION_ID);
+    conversationRuntime.registerSession(backgroundSession);
   }
   return backgroundSession;
 }
@@ -304,26 +307,22 @@ async function executeJob(job) {
     const jobPrompt = `[Scheduled Job: ${job.name}]\n\n${job.prompt}`;
     const messageStartIndex = session.messages.length;
 
-    // Execute via CalSession with job-specific maxIterations
-    const result = await session.sendMessage(jobPrompt, {
-      onToolCall: (name, input) => {
-        console.log(`[Gateway] Tool: ${name}`);
+    const result = await conversationRuntime.handleUserMessage({
+      source: 'job',
+      text: jobPrompt,
+      session,
+      handleCommands: false,
+      enableHandoff: !isBackgroundJob,
+      sessionOptions: {
+        onToolCall: (name) => {
+          console.log(`[Gateway] Tool: ${name}`);
+        },
+        maxIterations: job.maxIterations || 20,
+        isBackgroundJob: isBackgroundJob,
       },
-      maxIterations: job.maxIterations || 20,  // Default 20 for jobs
-      isBackgroundJob: isBackgroundJob,
     });
 
-    // Session Bridge: Check if handoff needed (only for main session)
-    let response = result.text;
-    const usage = result.usageStatus;
-
-    if (!isBackgroundJob && usage.thresholdHandoff && !usage.handoffTriggered) {
-      console.log(`[Gateway] Session Bridge: 90% threshold reached during job ${job.id}, performing in-session handoff`);
-      await performInSessionHandoff(session);
-      session.reset();
-      console.log(`[Gateway] Session Bridge: Session reset after handoff`);
-      response += '\n\n---\nSession saved and refreshed.';
-    }
+    const response = result.text;
 
     const deliveryResponse = getJobDeliveryResponse(job, response, session, messageStartIndex);
 
@@ -339,7 +338,12 @@ async function executeJob(job) {
       await sendTelegram(deliveryResponse);
     }
     if (wsIsConnected()) {
-      wsBroadcast({ type: 'proactive', text: deliveryResponse, messageId: `msg-${Date.now()}` });
+      publishEvent({
+        type: 'proactive',
+        sessionId: session.sessionId,
+        source: 'job',
+        payload: { text: deliveryResponse, messageId: `msg-${Date.now()}` },
+      });
     } else {
       await sendWebPush({ title: job.name || 'Cal', body: deliveryResponse });
     }
@@ -392,9 +396,12 @@ async function start() {
   // Pass session to channels
   if (telegramAvailable && setTelegramSession) {
     setTelegramSession(session);
+    registerChannelSender('telegram', sendTelegram);
   }
   setIMessageSession(session);
+  registerChannelSender('imessage', sendIMessage);
   setHttpSession(session);
+  conversationRuntime.setDefaultSession(session);
 
   // 4. Initialize MCP clients (connect to configured MCP servers like QMD)
   console.log('[Gateway] Connecting to MCP servers...');

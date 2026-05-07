@@ -4,7 +4,6 @@
  * Handles incoming Telegram messages and routes them through CalSession.
  * Supports skills loaded from .claude/skills/ directory.
  * Integrates Session Bridge for automatic context preservation.
- * Integrates AutoHeal for consent prompts and commands.
  *
  * Session is owned by gateway.js and passed via setSession().
  */
@@ -13,31 +12,16 @@ import { Telegraf } from 'telegraf';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { deleteSession } from './session-store.js';
-import { loadSkills, getSkill, getSkillPrompt, getSkillNames, hasSkill, getSkillExecutionOptions } from './skills.js';
-import {
-  performInSessionHandoff,
-} from './session-bridge.js';
-import {
-  isConsentResponse,
-  handleConsentResponse,
-  isAutoHealCommand,
-  handleAutoHealCommand,
-  hasPendingConsentPrompt,
-  clearPendingConsentPrompt,
-  getAutoHealLevel,
-  loadFix,
-} from './autoheal.js';
-import { setConsentPromptCallback } from './logger.js';
-import { performSurgery } from './surgery.js';
+import { loadSkills, getSkillPrompt, getSkillNames, hasSkill, getSkillExecutionOptions } from './skills.js';
 import { CAL_HOME } from './paths.js';
-import { getTelegramConfig, getGreeting, getMainSessionId } from './user-config.js';
-import { handleCommand } from './commands.js';
+import { getTelegramConfig, getGreeting } from './user-config.js';
+import { conversationRuntime } from './conversation-runtime.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENV_PATH = join(CAL_HOME, 'telegram-bot/.env');
 
 let bot = null;
+let botRunning = false;
 let session = null;  // Set by gateway via setSession()
 
 /**
@@ -85,6 +69,7 @@ export async function startTelegram() {
   bot = new Telegraf(token, {
     handlerTimeout: 5 * 60 * 1000,  // 5 minutes
   });
+  botRunning = false;
 
   console.log('[Telegram] Starting bot...');
 
@@ -145,20 +130,23 @@ export async function startTelegram() {
     ctx.reply(message, { parse_mode: 'Markdown' });
   });
 
-  bot.command('reset', (ctx) => {
-    const cmdResult = handleCommand('/reset', getSession());
-    ctx.reply(cmdResult.response);
-  });
+  const runBuiltinCommand = async (ctx, text) => {
+    try {
+      const result = await conversationRuntime.handleUserMessage({
+        source: 'telegram',
+        text,
+        session: getSession(),
+      });
+      await ctx.reply(result.text);
+    } catch (err) {
+      console.error(`[Telegram] Command error (${text}):`, err.message);
+      await ctx.reply(`Sorry, command ${text} failed: ${err.message}`);
+    }
+  };
 
-  bot.command('restart', (ctx) => {
-    const cmdResult = handleCommand('/restart', getSession());
-    ctx.reply(cmdResult.response);
-  });
-
-  bot.command('status', (ctx) => {
-    const cmdResult = handleCommand('/status', getSession());
-    ctx.reply(cmdResult.response);
-  });
+  bot.command('reset', (ctx) => runBuiltinCommand(ctx, '/reset'));
+  bot.command('restart', (ctx) => runBuiltinCommand(ctx, '/restart'));
+  bot.command('status', (ctx) => runBuiltinCommand(ctx, '/status'));
 
   // Skill handler - catches any /command and checks if it's a skill
   bot.use(async (ctx, next) => {
@@ -178,7 +166,7 @@ export async function startTelegram() {
     const commandName = commandMatch[1];
 
     // Skip built-in commands (already handled above)
-    const builtInCommands = ['start', 'help', 'reset', 'status', 'skills'];
+    const builtInCommands = ['start', 'help', 'reset', 'restart', 'status', 'skills'];
     if (builtInCommands.includes(commandName)) {
       return next();
     }
@@ -194,47 +182,37 @@ export async function startTelegram() {
 
     ctx.sendChatAction('typing');
 
+    let typingInterval = null;
     try {
       const s = getSession();
       const skillPrompt = getSkillPrompt(commandName);
       const skillOptions = getSkillExecutionOptions(commandName);
 
       // Keep typing indicator alive
-      const typingInterval = setInterval(() => {
+      typingInterval = setInterval(() => {
         ctx.sendChatAction('typing').catch(() => {});
       }, 4000);
 
-      const result = await s.sendMessage(skillPrompt, {
-        onToolCall: (name, input) => {
-          console.log(`[Telegram] Skill tool call: ${name}`);
+      const result = await conversationRuntime.handleUserMessage({
+        source: 'telegram',
+        text: skillPrompt,
+        session: s,
+        handleCommands: false,
+        sessionOptions: {
+          onToolCall: (name) => {
+            console.log(`[Telegram] Skill tool call: ${name}`);
+          },
+          ...skillOptions,
         },
-        ...skillOptions,
       });
 
-      clearInterval(typingInterval);
-
-      // Session Bridge: Check if handoff needed
-      let response = result.text;
-      const usage = result.usageStatus;
-
-      if (usage.thresholdHandoff && !usage.handoffTriggered) {
-        console.log(`[Telegram] Session Bridge: 90% threshold reached, performing in-session handoff`);
-
-        ctx.sendChatAction('typing');
-        await performInSessionHandoff(s);
-
-        // Reset session after handoff
-        s.reset();
-        console.log(`[Telegram] Session Bridge: Session reset after handoff`);
-
-        response += '\n\n---\nSession saved and refreshed. Continuing...';
-      }
-
-      await sendLongMessage(ctx, response);
+      await sendLongMessage(ctx, result.text);
 
     } catch (err) {
       console.error(`[Telegram] Skill error (${commandName}):`, err.message);
       ctx.reply(`Sorry, skill /${commandName} failed: ${err.message}`);
+    } finally {
+      if (typingInterval) clearInterval(typingInterval);
     }
   });
 
@@ -245,98 +223,38 @@ export async function startTelegram() {
 
     console.log(`[Telegram] Message from ${chatId}: ${message.substring(0, 50)}...`);
 
-    // Check for AutoHeal consent response (yes/no after consent prompt)
-    if (isConsentResponse(message)) {
-      const response = handleConsentResponse(message);
-      await ctx.reply(response);
-      return;
-    }
-
-    // Check for AutoHeal commands (enable/disable self-diagnosis)
-    if (isAutoHealCommand(message)) {
-      const response = handleAutoHealCommand(message);
-      if (response) {
-        await ctx.reply(response);
-        return;
-      }
-    }
-
-    // Check for "apply fix-XXX" command
-    const applyMatch = message.toLowerCase().match(/^apply\s+(fix-\d+)$/);
-    if (applyMatch) {
-      const fixId = applyMatch[1];
-      const fix = loadFix(fixId);
-
-      if (!fix) {
-        await ctx.reply(`Fix not found: ${fixId}`);
-        return;
-      }
-
-      // Check if Level 3 is enabled for automatic surgery
-      const level = getAutoHealLevel();
-      if (level >= 3) {
-        await ctx.reply(`Applying ${fixId}... I'll restart after the fix is applied.`);
-        ctx.sendChatAction('typing');
-
-        const result = await performSurgery(fixId);
-        await ctx.reply(result.message);
-      } else {
-        // Level 2: Show fix details and ask for confirmation
-        await ctx.reply(
-          `*Fix: ${fix.id}*\n\n` +
-          `Root cause: ${fix.rootCause}\n` +
-          `Description: ${fix.description}\n` +
-          `File: ${fix.file}\n\n` +
-          `To apply this fix automatically, enable SELF-SURGERY MODE by replying 'yes' to the diagnosis report, or say 'enable self-surgery'.`,
-          { parse_mode: 'Markdown' }
-        );
-      }
-      return;
-    }
-
     // Send "typing" indicator
     ctx.sendChatAction('typing');
 
+    let typingInterval = null;
     try {
       // Get shared session and send message
       const s = getSession();
 
       // Keep typing indicator alive during processing
-      const typingInterval = setInterval(() => {
+      typingInterval = setInterval(() => {
         ctx.sendChatAction('typing').catch(() => {});
       }, 4000);
 
-      const result = await s.sendMessage(message, {
-        onToolCall: (name, input) => {
-          console.log(`[Telegram] Tool call: ${name}`);
+      const result = await conversationRuntime.handleUserMessage({
+        source: 'telegram',
+        text: message,
+        session: s,
+        sessionOptions: {
+          onToolCall: (name) => {
+            console.log(`[Telegram] Tool call: ${name}`);
+          },
         },
       });
 
-      clearInterval(typingInterval);
-
-      // Session Bridge: Check if handoff needed
-      let response = result.text;
-      const usage = result.usageStatus;
-
-      if (usage.thresholdHandoff && !usage.handoffTriggered) {
-        console.log(`[Telegram] Session Bridge: 90% threshold reached, performing in-session handoff`);
-
-        ctx.sendChatAction('typing');
-        await performInSessionHandoff(s);
-
-        // Reset session after handoff
-        s.reset();
-        console.log(`[Telegram] Session Bridge: Session reset after handoff`);
-
-        response += '\n\n---\nSession saved and refreshed. Continuing...';
-      }
-
       // Send response (split if too long)
-      await sendLongMessage(ctx, response);
+      await sendLongMessage(ctx, result.text);
 
     } catch (err) {
       console.error('[Telegram] Error:', err.message);
       ctx.reply(`Sorry, something went wrong: ${err.message}`);
+    } finally {
+      if (typingInterval) clearInterval(typingInterval);
     }
   });
 
@@ -345,19 +263,10 @@ export async function startTelegram() {
     console.error('[Telegram] Bot error:', err);
   });
 
-  // Start polling
-  await bot.launch();
+  // Start polling (drop pending updates to avoid reprocessing old messages on restart)
+  await bot.launch({ dropPendingUpdates: true });
+  botRunning = true;
   console.log('[Telegram] Bot started successfully');
-
-  // Set up AutoHeal consent prompt callback
-  setConsentPromptCallback(async (message) => {
-    try {
-      await bot.telegram.sendMessage(getTelegramConfig().chatId, message, { parse_mode: 'Markdown' });
-      console.log('[Telegram] Sent AutoHeal consent prompt');
-    } catch (err) {
-      console.error('[Telegram] Failed to send consent prompt:', err.message);
-    }
-  });
 
   return bot;
 }
@@ -477,7 +386,16 @@ export async function sendMessage(text) {
 export function stopTelegram() {
   if (bot) {
     console.log('[Telegram] Stopping bot...');
-    bot.stop('Gateway shutdown');
+    if (botRunning) {
+      try {
+        bot.stop('Gateway shutdown');
+      } catch (err) {
+        if (!err.message?.includes('not running')) {
+          throw err;
+        }
+      }
+    }
+    botRunning = false;
     bot = null;
   }
 }

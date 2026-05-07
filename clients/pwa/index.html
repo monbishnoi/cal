@@ -696,7 +696,13 @@
     function handleServerEvent(msg) {
       switch (msg.type) {
         case 'status':
-          if (msg.state === 'idle' && !isProcessing) setStatus('online', 'Ready');
+          if (msg.state === 'processing') {
+            isProcessing = true;
+            setStatus('busy', 'Working');
+          } else if (msg.state === 'idle') {
+            isProcessing = false;
+            setStatus('online', 'Ready');
+          }
           break;
 
         case 'history':

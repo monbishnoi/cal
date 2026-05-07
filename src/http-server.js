@@ -2,7 +2,7 @@
  * HTTP/A2A Server for Cal Gateway
  *
  * Provides HTTP endpoints for A2A protocol (Agent-to-Agent) and static file serving.
- * Enables Joule to call Cal via JSON-RPC.
+ * Enables API clients to call Cal via JSON-RPC.
  * Integrates Session Bridge for automatic context preservation.
  *
  * Session is owned by gateway.js and passed via setSession().
@@ -14,91 +14,10 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
-import {
-  performInSessionHandoff,
-} from './session-bridge.js';
 import { getAssistantConfig, getUserName } from './user-config.js';
-import { handleCommand } from './commands.js';
-
-import { sendMessage as sendIMessage } from './imessage.js';
 import { initWebPush, getVapidPublicKey, addSubscription, removeSubscription, sendWebPush, getSubscriptionCount } from './web-push.js';
-
-// Optional Telegram module
-let sendTelegramMessage = null;
-try {
-  const telegram = await import('./telegram.js');
-  sendTelegramMessage = telegram.sendMessage;
-} catch {
-  // Telegram not available
-}
-
-// OAuth callback handler — set by jira-oauth-provider when auth is in progress
-let oauthCallbackHandler = null;
-
-/**
- * Register an OAuth callback handler.
- * Called by gateway.js when setting up Jira MCP auth.
- * @param {Function} handler - function(authorizationCode) to call when callback is received
- */
-export function setOAuthCallbackHandler(handler) {
-  oauthCallbackHandler = handler;
-}
-
-/**
- * Handle OAuth callback from browser redirect.
- * Extracts the authorization code and passes it to the registered handler.
- */
-function handleOAuthCallback(url, res) {
-  const code = url.searchParams.get('code');
-  const error = url.searchParams.get('error');
-
-  if (error) {
-    console.error(`[OAuth] Authorization error: ${error}`);
-    res.writeHead(400, { 'Content-Type': 'text/html' });
-    res.end(`
-      <html><body>
-        <h1>Authorization Failed</h1>
-        <p>Error: ${error}</p>
-        <p>${url.searchParams.get('error_description') || ''}</p>
-        <p>You can close this window.</p>
-      </body></html>
-    `);
-    return;
-  }
-
-  if (!code) {
-    console.error('[OAuth] No authorization code in callback');
-    res.writeHead(400, { 'Content-Type': 'text/html' });
-    res.end(`
-      <html><body>
-        <h1>Missing Authorization Code</h1>
-        <p>No code parameter received. Please try again.</p>
-      </body></html>
-    `);
-    return;
-  }
-
-  console.log(`[OAuth] Authorization code received: ${code.substring(0, 10)}...`);
-
-  // Send success page to browser
-  res.writeHead(200, { 'Content-Type': 'text/html' });
-  res.end(`
-    <html><body>
-      <h1>✅ Authorization Successful</h1>
-      <p>Cal Gateway has been authorized to access SAP Jira.</p>
-      <p>You can close this window and return to your chat.</p>
-      <script>setTimeout(() => window.close(), 3000);</script>
-    </body></html>
-  `);
-
-  // Deliver the code to the waiting auth flow
-  if (oauthCallbackHandler) {
-    oauthCallbackHandler(code);
-    oauthCallbackHandler = null; // One-time use
-  } else {
-    console.warn('[OAuth] Received callback but no handler registered');
-  }
-}
+import { eventBus } from './event-bus.js';
+import { conversationRuntime } from './conversation-runtime.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PWA_DIR = join(__dirname, '..', 'clients', 'pwa');
@@ -112,6 +31,12 @@ let httpServer = null;
 
 // Session (set by gateway via setSession())
 let session = null;
+const channelSenders = new Map();
+
+export function registerChannelSender(channel, sender) {
+  if (!channel || typeof sender !== 'function') return;
+  channelSenders.set(channel, sender);
+}
 
 /**
  * Set the shared session (called by gateway.js)
@@ -119,6 +44,7 @@ let session = null;
  */
 export function setSession(s) {
   session = s;
+  conversationRuntime.setDefaultSession(s);
 }
 
 /**
@@ -135,15 +61,64 @@ let wss = null;
 const wsClients = new Set();
 
 /**
- * Broadcast an event to all connected WebSocket clients.
- * @param {Object} event - The event object to send (must have a `type` field)
+ * Internal broadcast function - sends to all connected clients.
  */
-export function wsBroadcast(event) {
+function broadcastToClients(event) {
   const data = JSON.stringify(event);
   for (const client of wsClients) {
     if (client.readyState === 1) client.send(data);
   }
 }
+
+function mapRuntimeEventToWebSocket(event) {
+  if (event.source === 'job' && event.type !== 'proactive') {
+    return null;
+  }
+
+  switch (event.type) {
+    case 'run_started':
+      return { type: 'run_started', runId: event.runId };
+    case 'status_changed':
+      return { type: 'status', state: event.payload?.state || 'idle' };
+    case 'tool_call_started':
+      return {
+        type: 'step_started',
+        runId: event.runId,
+        tool: event.payload?.tool,
+        description: event.payload?.description,
+      };
+    case 'tool_call_finished':
+      return {
+        type: 'step_finished',
+        runId: event.runId,
+        tool: event.payload?.tool,
+      };
+    case 'response_complete':
+      return {
+        type: 'text_done',
+        runId: event.runId,
+        fullText: event.payload?.text || '',
+        messageId: event.payload?.messageId,
+      };
+    case 'run_finished':
+      return { type: 'run_finished', runId: event.runId };
+    case 'run_error':
+      return { type: 'run_error', runId: event.runId, error: event.payload?.error };
+    case 'proactive':
+      return { type: 'proactive', text: event.payload?.text || '', messageId: event.payload?.messageId };
+    case 'steer_ack':
+      return { type: 'steer_ack', text: event.payload?.text || '' };
+    default:
+      return null;
+  }
+}
+
+eventBus.subscribeAll((event) => {
+  const wsEvent = mapRuntimeEventToWebSocket(event);
+  if (wsEvent) {
+    broadcastToClients(wsEvent);
+  }
+});
 
 /**
  * Check if any WebSocket client is currently connected.
@@ -159,8 +134,9 @@ function handleWsConnection(ws) {
   console.log(`[WS] Client connected (${wsClients.size + 1} total)`);
   wsClients.add(ws);
 
-  // Send current status on connect
-  ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
+  const currentSession = getSession();
+  const state = currentSession?.isProcessingMessage ? 'processing' : 'idle';
+  ws.send(JSON.stringify({ type: 'status', state }));
 
   ws.on('message', (raw) => {
     let msg;
@@ -220,58 +196,14 @@ async function handleWsChatMessage(msg, ws) {
     return;
   }
 
-  // Unified command handler (shared with Telegram/iMessage)
-  const cmdResult = handleCommand(userMessage, currentSession);
-  if (cmdResult) {
-    const cmdRunId = `cmd-${Date.now()}`;
-    wsBroadcast({ type: 'run_started', runId: cmdRunId });
-    wsBroadcast({ type: 'text_done', runId: cmdRunId, fullText: cmdResult.response, messageId: `msg-${Date.now()}` });
-    wsBroadcast({ type: 'run_finished', runId: cmdRunId });
-    wsBroadcast({ type: 'status', state: 'idle' });
-    return;
-  }
-
-  const runId = `run-${randomUUID().slice(0, 8)}`;
-
-  // Emit run_started
-  wsBroadcast({ type: 'run_started', runId });
-  wsBroadcast({ type: 'status', state: 'processing' });
-
   try {
-    const result = await currentSession.sendMessage(userMessage, {
-      onToolCall: (toolName, toolInput) => {
-        if (toolName === 'system') {
-          wsBroadcast({ type: 'step_started', runId, tool: 'system', description: toolInput?.status || 'Processing...' });
-          return;
-        }
-        wsBroadcast({ type: 'step_started', runId, tool: toolName, description: describeToolCall(toolName, toolInput) });
-      },
-      onToolResult: (toolName) => {
-        wsBroadcast({ type: 'step_finished', runId, tool: toolName });
-      },
+    await conversationRuntime.handleUserMessage({
+      source: 'pwa',
+      text: userMessage,
+      session: currentSession,
     });
-
-    const responseText = result.text;
-    const usage = result.usageStatus;
-
-    // Session Bridge: check if handoff needed
-    if (usage.thresholdHandoff && !usage.handoffTriggered) {
-      console.log('[WS] Session Bridge: 90% threshold reached, performing in-session handoff');
-      await performInSessionHandoff(currentSession);
-      currentSession.reset();
-      console.log('[WS] Session Bridge: Session reset after handoff');
-    }
-
-    // Emit completed response
-    const messageId = `msg-${Date.now()}`;
-    wsBroadcast({ type: 'text_done', runId, fullText: responseText, messageId });
-    wsBroadcast({ type: 'run_finished', runId });
-    wsBroadcast({ type: 'status', state: 'idle' });
-
   } catch (err) {
     console.error('[WS] Error processing message:', err.message);
-    wsBroadcast({ type: 'run_error', runId, error: err.message });
-    wsBroadcast({ type: 'status', state: 'idle' });
   }
 }
 
@@ -289,26 +221,12 @@ function handleWsSteer(msg) {
   if (!currentSession) return;
 
   currentSession.addSteer(text);
-  wsBroadcast({ type: 'steer_ack', text });
-}
-
-/**
- * Generate a human-readable description for a tool call.
- * Derives description from tool name + input context automatically.
- */
-function describeToolCall(toolName, input) {
-  // Strip common prefixes
-  let name = toolName
-    .replace(/^(jira|teams|genai|qmd|sap)_/, '')
-    .replace(/_/g, ' ');
-
-  // Capitalize first letter
-  name = name.charAt(0).toUpperCase() + name.slice(1);
-
-  // Add context from input if available
-  const context = input?.query || input?.command?.substring(0, 50) || input?.path?.split('/').pop() || input?.filename || input?.title || input?.timeframe || '';
-
-  return context ? `${name}: ${context}` : name;
+  eventBus.publish({
+    type: 'steer_ack',
+    sessionId: currentSession.sessionId,
+    source: 'pwa',
+    payload: { text },
+  });
 }
 
 function stripInjectedContext(text) {
@@ -470,20 +388,12 @@ async function handleMessageSend(rpcRequest, res) {
   try {
     console.log(`[A2A] Processing message: "${userMessage.substring(0, 50)}..."`);
 
-    // Send to Claude and get response
-    const result = await session.sendMessage(userMessage);
-
-    // Session Bridge: Check if handoff needed
-    let responseText = result.text;
-    const usage = result.usageStatus;
-
-    if (usage.thresholdHandoff && !usage.handoffTriggered) {
-      console.log(`[A2A] Session Bridge: 90% threshold reached, performing in-session handoff`);
-      await performInSessionHandoff(session);
-      session.reset();
-      console.log(`[A2A] Session Bridge: Session reset after handoff`);
-      responseText += '\n\n---\nSession saved and refreshed. Continuing...';
-    }
+    const result = await conversationRuntime.handleUserMessage({
+      source: 'a2a',
+      text: userMessage,
+      session,
+    });
+    const responseText = result.text;
 
     console.log(`[A2A] Response ready (${responseText.length} chars)`);
 
@@ -523,10 +433,10 @@ async function handleMessageSend(rpcRequest, res) {
 }
 
 /**
- * Handle A2A / Joule agent-request
+ * Handle A2A requests
  * Supports both:
  * 1. Standard A2A JSON-RPC (method: "message/send")
- * 2. Joule's simpler format (direct {message, contextId} body)
+ * 2. Simple direct format ({message, contextId})
  */
 async function handleA2ARequest(req, res) {
   // Read request body
@@ -577,20 +487,17 @@ async function handleA2ARequest(req, res) {
         }));
     }
   } else {
-    // Joule's simpler format: { message: "...", contextId: "..." }
-    console.log(`[A2A] Joule direct request format detected`);
-    await handleJouleDirectRequest(parsedBody, res);
+    console.log(`[A2A] Direct request format detected`);
+    await handleDirectA2ARequest(parsedBody, res);
   }
 }
 
 /**
- * Handle Joule's direct agent-request format
- * Joule sends: { message: "user text", contextId: "optional" }
- * Joule expects: { message: "response text", type: "finalAnswer", contextId: "..." }
+ * Handle simple direct agent-request format.
  */
-async function handleJouleDirectRequest(requestBody, res) {
+async function handleDirectA2ARequest(requestBody, res) {
   const userMessage = requestBody.message || requestBody.Message || '';
-  const contextId = requestBody.contextId || requestBody.contextID || `joule-${randomUUID()}`;
+  const contextId = requestBody.contextId || requestBody.contextID || `ctx-${randomUUID()}`;
 
   if (!userMessage) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -602,30 +509,21 @@ async function handleJouleDirectRequest(requestBody, res) {
     return;
   }
 
-  console.log(`[Joule] Processing: "${userMessage.substring(0, 50)}..." (context: ${contextId})`);
+  console.log(`[A2A] Processing direct request: "${userMessage.substring(0, 50)}..." (context: ${contextId})`);
 
   // Use shared session (set by gateway.js)
   const session = getSession();
 
   try {
-    // Send to Claude and get response
-    const result = await session.sendMessage(userMessage);
+    const result = await conversationRuntime.handleUserMessage({
+      source: 'a2a-direct',
+      text: userMessage,
+      session,
+    });
+    const responseText = result.text;
 
-    // Session Bridge: Check if handoff needed
-    let responseText = result.text;
-    const usage = result.usageStatus;
+    console.log(`[A2A] Direct response ready (${responseText.length} chars)`);
 
-    if (usage.thresholdHandoff && !usage.handoffTriggered) {
-      console.log(`[Joule] Session Bridge: 90% threshold reached, performing in-session handoff`);
-      await performInSessionHandoff(session);
-      session.reset();
-      console.log(`[Joule] Session Bridge: Session reset after handoff`);
-      responseText += '\n\n---\nSession saved and refreshed. Continuing...';
-    }
-
-    console.log(`[Joule] Response ready (${responseText.length} chars)`);
-
-    // Return in Joule's expected format
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       message: responseText,
@@ -634,7 +532,7 @@ async function handleJouleDirectRequest(requestBody, res) {
     }));
 
   } catch (err) {
-    console.error(`[Joule] Error processing message:`, err.message);
+    console.error(`[A2A] Error processing direct message:`, err.message);
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -671,13 +569,7 @@ async function handleSendMessage(req, res) {
     return;
   }
 
-  // Use direct imports (bypass channelSenders registration)
-  let sender;
-  if (channel === 'telegram') {
-    sender = sendTelegramMessage;
-  } else if (channel === 'imessage') {
-    sender = sendIMessage;
-  }
+  const sender = channelSenders.get(channel);
 
   if (!sender) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -813,12 +705,6 @@ async function handleHttpRequest(req, res) {
     const result = await sendWebPush({ title: 'Cal', body: 'Test notification — push is working!' });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
-    return;
-  }
-
-  // OAuth callback (receives authorization code from browser redirect)
-  if (pathname === '/oauth/callback' && req.method === 'GET') {
-    handleOAuthCallback(url, res);
     return;
   }
 

@@ -3,9 +3,8 @@
  *
  * Handles incoming iMessages and routes them through CalSession.
  * Uses imsg CLI to read from Messages database and send via AppleScript.
- * Same shared session as Telegram, Joule, and scheduled jobs.
+ * Same shared session as Telegram, PWA, and scheduled jobs.
  * Integrates Session Bridge for automatic context preservation.
- * Integrates AutoHeal for consent prompts and commands.
  *
  * Session is owned by gateway.js and passed via setSession().
  *
@@ -24,17 +23,8 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadSkills, getSkillPrompt, getSkillNames, hasSkill, getSkillExecutionOptions } from './skills.js';
-import {
-  performInSessionHandoff,
-} from './session-bridge.js';
-import {
-  isConsentResponse,
-  handleConsentResponse,
-  isAutoHealCommand,
-  handleAutoHealCommand,
-} from './autoheal.js';
 import { getIMessageConfig } from './user-config.js';
-import { handleCommand } from './commands.js';
+import { conversationRuntime } from './conversation-runtime.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(__dirname, '../config/imessage.json');
@@ -251,84 +241,6 @@ async function handleIncoming(message) {
   console.log(`[iMessage] Received: "${text.substring(0, 80)}${text.length > 80 ? '...' : ''}"`);
 
   try {
-    // Check for AutoHeal consent response (yes/no after consent prompt)
-    if (isConsentResponse(text)) {
-      const response = handleConsentResponse(text);
-      await sendResponse(response);
-      return;
-    }
-
-    // Check for AutoHeal commands (enable/disable self-diagnosis)
-    if (isAutoHealCommand(text)) {
-      const response = handleAutoHealCommand(text);
-      if (response) {
-        await sendResponse(response);
-        return;
-      }
-    }
-
-    // Handle commands
-    const cmdResult = handleCommand(text, getSession());
-    if (cmdResult) {
-      await sendResponse(cmdResult.response);
-      return;
-    }
-
-    // Jira OAuth: trigger first-time browser authentication
-    if (text.toLowerCase() === '/jira-auth') {
-      try {
-        const { getJiraOAuthProvider } = await import('./jira-oauth-provider.js');
-        const { getMCPClientManager } = await import('./mcp-client.js');
-        const { setOAuthCallbackHandler } = await import('./http-server.js');
-
-        const provider = getJiraOAuthProvider();
-        const manager = getMCPClientManager();
-
-        // Check if already authenticated
-        if (manager.isConnected('jira') && !manager.hasPendingAuth('jira')) {
-          const tools = manager.getTools('jira');
-          await sendResponse(`✅ Jira is already connected with ${tools.length} tools available.`);
-          return;
-        }
-
-        // Check if Jira MCP is even configured
-        if (!manager.hasPendingAuth('jira') && !manager.isConnected('jira')) {
-          await sendResponse('Jira MCP is not configured or failed to initialize. Check jobs.json and Gateway logs.');
-          return;
-        }
-
-        await sendResponse('🔐 Starting Jira OAuth flow...\n\nA browser window will open on your Mac for SAP SSO login. After you log in, the token will be saved automatically.');
-
-        // Set up the callback: when browser redirects back, complete the auth
-        setOAuthCallbackHandler(async (authCode) => {
-          try {
-            console.log('[iMessage] Jira OAuth callback received, completing auth...');
-            await manager.completeAuth('jira', authCode);
-            const tools = manager.getTools('jira');
-            await sendResponse(`✅ Jira authenticated! ${tools.length} tools now available:\n${tools.map(t => '• ' + t.name).join('\n')}`);
-          } catch (err) {
-            console.error('[iMessage] Jira OAuth completion failed:', err.message);
-            await sendResponse(`❌ Jira auth failed: ${err.message}\n\nTry /jira-auth again.`);
-          }
-        });
-
-        // Trigger the connection attempt which will open the browser
-        // (The provider's redirectToAuthorization will open the browser)
-        if (manager.hasPendingAuth('jira')) {
-          // Already attempted once at startup, need to retry the connection
-          const config = (await import('./scheduler.js')).loadJobs();
-          const jiraConfig = config.mcpServers?.jira;
-          if (jiraConfig) {
-            await manager.reconnect('jira', jiraConfig.endpoint, { authProvider: provider });
-          }
-        }
-      } catch (err) {
-        console.error('[iMessage] Jira auth error:', err.message);
-        await sendResponse(`❌ Error: ${err.message}`);
-      }
-      return;
-    }
-
     // Check for skill triggers
     const skillMatch = text.match(/^\/([\w-]+)/);
     if (skillMatch) {
@@ -337,42 +249,29 @@ async function handleIncoming(message) {
         const skillPrompt = getSkillPrompt(skillName);
         const skillOptions = getSkillExecutionOptions(skillName);
         const s = getSession();
-        const result = await s.sendMessage(skillPrompt, skillOptions);
+        const result = await conversationRuntime.handleUserMessage({
+          source: 'imessage',
+          text: skillPrompt,
+          session: s,
+          handleCommands: false,
+          sessionOptions: skillOptions,
+        });
 
-        // Session Bridge: Check if handoff needed
-        let response = result.text;
-        const usage = result.usageStatus;
-
-        if (usage.thresholdHandoff && !usage.handoffTriggered) {
-          console.log(`[iMessage] Session Bridge: 90% threshold reached, performing in-session handoff`);
-          await performInSessionHandoff(s);
-          s.reset();
-          console.log(`[iMessage] Session Bridge: Session reset after handoff`);
-          response += '\n\n---\nSession saved and refreshed. Continuing...';
-        }
-
-        await sendResponse(response);
+        await sendResponse(result.text);
         return;
       }
     }
 
     // Regular message — send to CalSession
     const s = getSession();
-    const result = await s.sendMessage(text);
 
-    // Session Bridge: Check if handoff needed
-    let response = result.text;
-    const usage = result.usageStatus;
+    const result = await conversationRuntime.handleUserMessage({
+      source: 'imessage',
+      text,
+      session: s,
+    });
 
-    if (usage.thresholdHandoff && !usage.handoffTriggered) {
-      console.log(`[iMessage] Session Bridge: 90% threshold reached, performing in-session handoff`);
-      await performInSessionHandoff(s);
-      s.reset();
-      console.log(`[iMessage] Session Bridge: Session reset after handoff`);
-      response += '\n\n---\nSession saved and refreshed. Continuing...';
-    }
-
-    await sendResponse(response);
+    await sendResponse(result.text);
 
   } catch (err) {
     console.error('[iMessage] Error handling message:', err.message);
