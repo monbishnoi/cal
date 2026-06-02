@@ -416,6 +416,7 @@ function isSelfDescribingToolName(serverName, toolName) {
   }
 
   if (serverName === 'qmd' && normalizedTool.startsWith('qmd_')) return true;
+  if (serverName.includes('google') && normalizedTool.startsWith('google_')) return true;
 
   return false;
 }

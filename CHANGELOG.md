@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a provider-neutral Google Workspace MCP example with Drive/Docs search, read, create, and non-destructive batch update tools.
+- Added per-server MCP tool allowlist/blocklist policy enforcement and write-confirmation docs for Google Docs writes.
+- Increased the PWA single-message input window to 50K characters with a live counter.
 - Added multi-channel `ConversationRuntime` with a shared `EventBus` and append-only event log.
 - Routed PWA, scheduled jobs, Telegram, and iMessage conversation turns through the runtime boundary.
 - Added runtime lifecycle WebSocket events for PWA status/tool/response updates.

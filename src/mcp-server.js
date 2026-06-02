@@ -172,12 +172,16 @@ function getAllTools() {
   const externalTools = mcpManager.getAllTools();
   for (const { serverName, tool } of externalTools) {
     // Build tool name - avoid double-prefixing if tool already has server prefix.
-    const toolNameLower = tool.name.toLowerCase();
-    const serverPrefix = serverName.toLowerCase().replace(/-/g, '_') + '_';
+    const normalizedServer = serverName.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/-/g, '_');
+    const compactServer = normalizedServer.replace(/_/g, '');
+    const toolNameLower = tool.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const serverPrefix = normalizedServer + '_';
     const alreadyPrefixed = toolNameLower.startsWith(serverPrefix) ||
-                           toolNameLower.startsWith(serverName.toLowerCase().replace(/-/g, '') + '_');
+                           toolNameLower.startsWith(compactServer + '_') ||
+                           (serverName.includes('google') && toolNameLower.startsWith('google_')) ||
+                           (serverName === 'qmd' && toolNameLower.startsWith('qmd_'));
 
-    const exposedName = alreadyPrefixed ? tool.name : `${serverName}_${tool.name}`;
+    const exposedName = alreadyPrefixed ? tool.name : `${normalizedServer}_${tool.name}`;
 
     allTools.push({
       name: exposedName,

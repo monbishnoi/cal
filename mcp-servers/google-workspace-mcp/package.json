@@ -1,0 +1,9 @@
+{
+  "name": "cal-google-workspace-mcp",
+  "version": "0.1.0",
+  "description": "Cal Gateway Google Workspace MCP wrapper for Phase 1 Drive/Docs access",
+  "type": "module",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {}
+}

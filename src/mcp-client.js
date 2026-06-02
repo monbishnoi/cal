@@ -50,6 +50,34 @@ function expandConnectionConfig(config) {
   return expanded;
 }
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function compileToolPattern(pattern) {
+  if (pattern instanceof RegExp) {
+    return pattern;
+  }
+
+  try {
+    return new RegExp(String(pattern), 'i');
+  } catch {
+    return new RegExp(escapeRegex(pattern), 'i');
+  }
+}
+
+function createToolPolicy(config = {}) {
+  return {
+    allowedTools: Array.isArray(config.allowedTools) && config.allowedTools.length > 0
+      ? new Set(config.allowedTools)
+      : null,
+    blockedTools: new Set(Array.isArray(config.blockedTools) ? config.blockedTools : []),
+    blockedToolPatterns: Array.isArray(config.blockedToolPatterns)
+      ? config.blockedToolPatterns.map(compileToolPattern)
+      : [],
+  };
+}
+
 /**
  * Manages multiple MCP client connections
  */
@@ -59,6 +87,37 @@ export class MCPClientManager {
     this.transports = new Map();   // serverName -> Transport instance
     this.tools = new Map();        // serverName -> available tools
     this.processes = new Map();    // serverName -> child process (for stdio servers)
+    this.policies = new Map();     // serverName -> allow/block policy
+  }
+
+  setPolicy(name, config = {}) {
+    this.policies.set(name, createToolPolicy(config));
+  }
+
+  isToolAllowed(serverName, toolName) {
+    const policy = this.policies.get(serverName);
+    if (!policy) return true;
+
+    if (policy.allowedTools && !policy.allowedTools.has(toolName)) {
+      return false;
+    }
+
+    if (policy.blockedTools.has(toolName)) {
+      return false;
+    }
+
+    return !policy.blockedToolPatterns.some(pattern => pattern.test(toolName));
+  }
+
+  filterTools(serverName, tools = []) {
+    const filtered = tools.filter(tool => this.isToolAllowed(serverName, tool.name));
+    const blocked = tools.filter(tool => !this.isToolAllowed(serverName, tool.name));
+
+    if (blocked.length > 0) {
+      console.warn(`[MCP] ${serverName}: policy blocked tools: ${blocked.map(t => t.name).join(', ')}`);
+    }
+
+    return filtered;
   }
 
   /**
@@ -78,6 +137,8 @@ export class MCPClientManager {
     if (typeof config === 'string') {
       config = { ...options, endpoint: config };
     }
+
+    this.setPolicy(name, config);
 
     // Determine transport type
     const transportType = config.type || (config.endpoint ? 'http' : 'stdio');
@@ -126,13 +187,14 @@ export class MCPClientManager {
       await client.connect(transport);
 
       const toolsResponse = await client.listTools();
-      const tools = toolsResponse.tools || [];
+      const discoveredTools = toolsResponse.tools || [];
+      const tools = this.filterTools(name, discoveredTools);
 
       this.clients.set(name, client);
       this.transports.set(name, transport);
       this.tools.set(name, tools);
 
-      console.log(`[MCP] Connected to ${name}: ${tools.length} tools available`);
+      console.log(`[MCP] Connected to ${name}: ${tools.length}/${discoveredTools.length} tools available after policy`);
       console.log(`[MCP] Tools: ${tools.map(t => t.name).join(', ')}`);
 
       return tools;
@@ -195,14 +257,15 @@ export class MCPClientManager {
 
       // Discover available tools
       const toolsResponse = await client.listTools();
-      const tools = toolsResponse.tools || [];
+      const discoveredTools = toolsResponse.tools || [];
+      const tools = this.filterTools(name, discoveredTools);
 
       // Store references
       this.clients.set(name, client);
       this.transports.set(name, transport);
       this.tools.set(name, tools);
 
-      console.log(`[MCP] Connected to ${name}: ${tools.length} tools available`);
+      console.log(`[MCP] Connected to ${name}: ${tools.length}/${discoveredTools.length} tools available after policy`);
       if (tools.length > 0) {
         console.log(`[MCP] Tools: ${tools.map(t => t.name).join(', ')}`);
       }
@@ -263,6 +326,10 @@ export class MCPClientManager {
       throw new Error(`MCP server '${serverName}' not connected`);
     }
 
+    if (!this.isToolAllowed(serverName, toolName)) {
+      throw new Error(`MCP tool '${serverName}/${toolName}' is blocked by Gateway policy`);
+    }
+
     console.log(`[MCP] Calling ${serverName}/${toolName}`, args);
 
     try {
@@ -304,6 +371,7 @@ export class MCPClientManager {
       this.clients.delete(name);
       this.transports.delete(name);
       this.tools.delete(name);
+      this.policies.delete(name);
     }
   }
 

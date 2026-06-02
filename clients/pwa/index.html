@@ -442,6 +442,19 @@
       margin: 0 auto;
     }
 
+    .input-meta {
+      grid-column: 1 / -1;
+      min-height: 15px;
+      color: var(--subtle);
+      font-size: 11px;
+      line-height: 1.35;
+      text-align: right;
+    }
+
+    .input-meta.warning {
+      color: var(--accent-2);
+    }
+
     textarea {
       width: 100%;
       max-height: 132px;
@@ -607,13 +620,14 @@
 
     <form class="composer" id="composer">
       <div class="composer-shell">
-        <textarea id="input" rows="1" maxlength="4000" autocomplete="off" autocapitalize="sentences" placeholder="Message Cal..."></textarea>
+        <textarea id="input" rows="1" maxlength="50000" autocomplete="off" autocapitalize="sentences" placeholder="Message Cal..."></textarea>
         <button class="send" id="send" type="submit" aria-label="Send message" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="M22 2 11 13"></path>
             <path d="m22 2-7 20-4-9-9-4 20-7Z"></path>
           </svg>
         </button>
+        <div class="input-meta" id="inputMeta"></div>
       </div>
     </form>
   </div>
@@ -624,6 +638,7 @@
     const messagesEl = document.getElementById('messages');
     const emptyState = document.getElementById('emptyState');
     const input = document.getElementById('input');
+    const inputMeta = document.getElementById('inputMeta');
     const sendBtn = document.getElementById('send');
     const composer = document.getElementById('composer');
     const refreshBtn = document.getElementById('refreshBtn');
@@ -635,6 +650,9 @@
     let isProcessing = false;
     let pendingBubble = null;
     let activityFeed = null;
+    const MAX_INPUT_CHARS = 50000;
+    const TOKEN_ESTIMATE_CHARS = 4;
+    input.maxLength = MAX_INPUT_CHARS;
 
     // --- WebSocket Connection ---
     const WS_ORIGIN = window.location.protocol === 'file:'
@@ -1088,6 +1106,21 @@
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 132) + 'px';
       sendBtn.disabled = input.value.trim().length === 0;
+      updateInputMeta();
+    }
+
+    function formatCompactNumber(value) {
+      if (value >= 1000) {
+        return (value / 1000).toFixed(value >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k';
+      }
+      return String(value);
+    }
+
+    function updateInputMeta() {
+      const charCount = input.value.length;
+      const estimatedTokens = Math.ceil(charCount / TOKEN_ESTIMATE_CHARS);
+      inputMeta.textContent = `${charCount.toLocaleString()} / ${MAX_INPUT_CHARS.toLocaleString()} chars / ~${formatCompactNumber(estimatedTokens)} tokens`;
+      inputMeta.classList.toggle('warning', charCount >= MAX_INPUT_CHARS * 0.9);
     }
 
     // --- Event Listeners ---

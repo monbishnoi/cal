@@ -78,6 +78,33 @@
       "endpoint": "",
       "enabled": false,
       "description": "Optional local semantic search MCP server. Filled by setup/qmd-setup.sh."
+    },
+    "google-workspace": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["mcp-servers/google-workspace-mcp/index.js"],
+      "env": {
+        "GWS_BIN": "gws"
+      },
+      "enabled": false,
+      "public": true,
+      "distribution": "public",
+      "allowedTools": [
+        "google_drive_search_docs",
+        "google_docs_read",
+        "google_docs_create",
+        "google_docs_batch_update"
+      ],
+      "blockedToolPatterns": [
+        "delete",
+        "trash",
+        "share",
+        "permission",
+        "acl",
+        "owner",
+        "transfer"
+      ],
+      "description": "Optional Google Workspace MCP wrapper for Drive/Docs search/read/create/batch update. Writes require approval tokens."
     }
   }
 }

@@ -94,7 +94,7 @@ Just talk to Cal:
 | **Auto Heal** | Disabled-by-default repair review that can summarize failures and propose fixes (coming soon) |
 | **Web Search** | Search the web when an API key is configured |
 | **File Operations** | Read, write, and edit files on your machine |
-| **MCP Servers** | Connect external Model Context Protocol servers and expose their tools to Claude |
+| **MCP Servers** | Connect approved Model Context Protocol servers, including optional external-service examples such as Google Workspace |
 
 All of this happens through conversation and explicit configuration.
 
@@ -112,6 +112,8 @@ All of this happens through conversation and explicit configuration.
 | **Scheduler** | Runs configured jobs on recurring schedules |
 
 You configure the parts you want. The rest can stay off.
+
+Optional MCP examples include [Google Workspace MCP](docs/google-workspace-mcp.md), which exposes a narrow Drive/Docs surface with write confirmation.
 
 ---
 
