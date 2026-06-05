@@ -71,6 +71,12 @@
       "enabled": false,
       "mode": "proposal",
       "_comment": "Optional generic repair review. Disabled by default and proposal-only in the public template."
+    },
+    "loopPilot": {
+      "enabled": false,
+      "mode": "off",
+      "mcpEndpoint": "http://localhost:8191/mcp",
+      "description": "Optional Loop Pilot guidance integration. Modes: off, advisory, guidance."
     }
   },
   "mcpServers": {
@@ -78,6 +84,17 @@
       "endpoint": "",
       "enabled": false,
       "description": "Optional local semantic search MCP server. Filled by setup/qmd-setup.sh."
+    },
+    "loop-pilot": {
+      "endpoint": "http://localhost:8191/mcp",
+      "enabled": false,
+      "allowedTools": [
+        "plan_task",
+        "record_episode",
+        "import_episodes",
+        "get_stats"
+      ],
+      "description": "Optional Loop Pilot trajectory optimizer for advisory budget and prompt guidance from past behavior episodes."
     },
     "google-workspace": {
       "type": "stdio",

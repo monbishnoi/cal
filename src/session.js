@@ -14,6 +14,7 @@ import { getTools, executeToolCall } from './tools.js';
 import { saveSession, getSession } from './session-store.js';
 import { performInSessionHandoff } from './session-bridge.js';
 import { logError } from './logger.js';
+import { getLoopPilotGuidance } from './loop-pilot.js';
 
 // API Configuration
 const API_KEY = process.env.HYPERSPACE_PROXY_KEY || process.env.ANTHROPIC_API_KEY;
@@ -269,9 +270,16 @@ export class CalSession {
       this.persistToDisk(); // Persist the repair immediately
     }
 
-    // Add timestamp context
+    // Add timestamp context and optional Loop Pilot guidance.
     const timeContext = getCurrentTimeContext();
-    const messageContent = `${timeContext}\n\n${userMessage}`;
+    const loopPilotGuidance = await getLoopPilotGuidance(userMessage, {
+      ...options,
+      sessionId: this.sessionId,
+      maxIterations: customMaxIterations || 10,
+    });
+    const messageContent = loopPilotGuidance
+      ? `${timeContext}\n\n${loopPilotGuidance}\n\n${userMessage}`
+      : `${timeContext}\n\n${userMessage}`;
 
     // Add user message to history
     this.messages.push({
