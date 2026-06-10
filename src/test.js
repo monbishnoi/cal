@@ -11,6 +11,7 @@ process.env.CAL_HTTP_PORT = '0';
 
 const { eventBus } = await import('./event-bus.js');
 const { conversationRuntime } = await import('./conversation-runtime.js');
+const { CalSession } = await import('./session.js');
 const {
   setSession,
   startHttpServer,
@@ -54,6 +55,61 @@ function createFakeSession(sessionId = 'test-main') {
       };
     },
   };
+}
+
+function createSteerBoundarySession() {
+  const calls = [];
+  const session = Object.create(CalSession.prototype);
+
+  Object.assign(session, {
+    sessionId: 'steer-boundary-test',
+    messages: [{ role: 'user', content: 'original request' }],
+    steerQueue: [],
+    model: 'test-model',
+    systemPrompt: 'test-system',
+    tokenUsage: { inputTokens: 0, outputTokens: 0, lastUpdated: null },
+    client: {
+      messages: {
+        create: async (payload) => {
+          calls.push(JSON.parse(JSON.stringify(payload.messages)));
+          return {
+            content: [{ type: 'text', text: 'ok' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 10, output_tokens: 5 },
+          };
+        },
+      },
+    },
+  });
+
+  return { session, calls };
+}
+
+async function testSteersDrainBeforeEveryModelCall() {
+  const { session, calls } = createSteerBoundarySession();
+
+  session.addSteer('first steer');
+  await session.callClaude();
+
+  assert.equal(session.steerQueue.length, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].at(-1).content, '[USER STEERING]: first steer');
+
+  session.addSteer('second steer');
+  session.addSteer('third steer');
+  await session.callClaude();
+
+  assert.equal(session.steerQueue.length, 0);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].at(-1).content, '[USER STEERING]: second steer\nthird steer');
+
+  await session.callClaude();
+
+  assert.equal(calls.length, 3);
+  assert.equal(
+    calls[2].filter(msg => typeof msg.content === 'string' && msg.content.startsWith('[USER STEERING]:')).length,
+    2
+  );
 }
 
 async function testConversationRuntimeEvents() {
@@ -166,6 +222,7 @@ async function testHttpWebSocketEndToEnd() {
 }
 
 try {
+  await testSteersDrainBeforeEveryModelCall();
   await testConversationRuntimeEvents();
   await testCommandDoesNotCallModel();
   await testHttpWebSocketEndToEnd();

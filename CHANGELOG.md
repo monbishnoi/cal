@@ -9,6 +9,7 @@
 - Routed PWA, scheduled jobs, Telegram, and iMessage conversation turns through the runtime boundary.
 - Added runtime lifecycle WebSocket events for PWA status/tool/response updates.
 - Added `src/test.js` runtime smoke tests covering event ordering, command handling, and HTTP/WebSocket flow.
+- Fixed queued PWA steering so guidance is injected before every model call, not only between tool iterations.
 - Kept the public package provider-neutral by removing old self-healing and provider-specific references from touched runtime/channel files.
 
 ## v1.0.0 - 2026-05-05

@@ -368,17 +368,6 @@ export class CalSession {
           content: toolResults,
         });
 
-        // Steering: inject any queued user guidance before the next Claude call
-        if (this.steerQueue.length > 0) {
-          const steers = this.steerQueue.splice(0);
-          const steerText = `[USER STEERING]: ${steers.join('\n')}`;
-          console.log(`[Session ${this.sessionId}] Injecting ${steers.length} steer message(s)`);
-          this.messages.push({
-            role: 'user',
-            content: steerText,
-          });
-        }
-
         // Continue conversation with tool results
         try {
           response = await this.callClaude();
@@ -751,6 +740,8 @@ export class CalSession {
    * Call Claude API with current message history
    */
   async callClaude() {
+    this.drainSteerQueue();
+
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: 4096,
@@ -770,6 +761,22 @@ export class CalSession {
     }
 
     return response;
+  }
+
+  drainSteerQueue() {
+    if (this.steerQueue.length === 0) {
+      return false;
+    }
+
+    const steers = this.steerQueue.splice(0);
+    const steerText = `[USER STEERING]: ${steers.join('\n')}`;
+    console.log(`[Session ${this.sessionId}] Injecting ${steers.length} steer message(s)`);
+    this.messages.push({
+      role: 'user',
+      content: steerText,
+    });
+
+    return true;
   }
 
   /**
@@ -803,7 +810,7 @@ export class CalSession {
   }
 
   /**
-   * Queue a steering message for injection between tool iterations.
+   * Queue a steering message for injection before the next model call.
    */
   addSteer(text) {
     this.steerQueue.push(text);
