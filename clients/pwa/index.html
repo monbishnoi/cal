@@ -342,6 +342,14 @@
       animation: rise 0.18s ease-out;
     }
 
+    .chat-session {
+      display: none;
+    }
+
+    .chat-session.active {
+      display: block;
+    }
+
     @keyframes rise {
       from {
         opacity: 0;
@@ -779,17 +787,27 @@
 
     let toastTimer = null;
     let isProcessing = false;
-    let pendingBubble = null;
-    let activityFeed = null;
     let multiSessionEnabled = false;
     let activeSessionId = null;
     const sessions = new Map();
+    const sessionViews = new Map();
+    const DEFAULT_SESSION_ID = '__default__';
     const MAX_INPUT_CHARS = 50000;
     const TOKEN_ESTIMATE_CHARS = 4;
     input.maxLength = MAX_INPUT_CHARS;
 
     function getActiveSession() {
       return activeSessionId ? sessions.get(activeSessionId) : null;
+    }
+
+    function getCalHomeSession() {
+      return Array.from(sessions.values()).find(session => session.permanent) || null;
+    }
+
+    function getFallbackSessionId(preferredSessionId = null) {
+      if (preferredSessionId && sessions.has(preferredSessionId)) return preferredSessionId;
+      const home = getCalHomeSession();
+      return home?.sessionId || Array.from(sessions.keys())[0] || null;
     }
 
     function isActiveProcessing() {
@@ -804,12 +822,85 @@
       return /No active session|Unknown session/i.test(String(error || ''));
     }
 
-    function clearPendingResponse() {
-      if (pendingBubble) {
-        pendingBubble.remove();
-        pendingBubble = null;
+    function viewIdFor(sessionId) {
+      return sessionId || activeSessionId || DEFAULT_SESSION_ID;
+    }
+
+    function ensureSessionView(sessionId = activeSessionId) {
+      const id = viewIdFor(sessionId);
+      let view = sessionViews.get(id);
+      if (view) return view;
+
+      const container = document.createElement('section');
+      container.className = 'chat-session';
+      container.dataset.sessionId = id;
+      messagesEl.appendChild(container);
+
+      view = {
+        id,
+        container,
+        pendingBubble: null,
+        activityFeed: null,
+      };
+      sessionViews.set(id, view);
+      showActiveSessionView();
+      return view;
+    }
+
+    function migrateDefaultView(sessionId) {
+      if (!sessionId || sessionId === DEFAULT_SESSION_ID || !sessionViews.has(DEFAULT_SESSION_ID) || sessionViews.has(sessionId)) {
+        return;
       }
-      activityFeed = null;
+      const view = sessionViews.get(DEFAULT_SESSION_ID);
+      sessionViews.delete(DEFAULT_SESSION_ID);
+      view.id = sessionId;
+      view.container.dataset.sessionId = sessionId;
+      sessionViews.set(sessionId, view);
+    }
+
+    function getSessionView(sessionId = activeSessionId) {
+      return ensureSessionView(sessionId);
+    }
+
+    function showActiveSessionView(options = {}) {
+      const activeId = viewIdFor(activeSessionId);
+      for (const [id, view] of sessionViews.entries()) {
+        view.container.classList.toggle('active', id === activeId);
+      }
+      updateEmptyState();
+      if (options.scrollToBottom) {
+        scrollActiveSessionToBottom();
+      }
+    }
+
+    function updateEmptyState() {
+      const activeView = sessionViews.get(viewIdFor(activeSessionId));
+      emptyState.hidden = Boolean(activeView && activeView.container.childElementCount > 0);
+    }
+
+    function shouldSyncSessionView(sessionId) {
+      const view = sessionViews.get(viewIdFor(sessionId));
+      return !view || (view.container.childElementCount === 0 && !view.pendingBubble);
+    }
+
+    function removeStaleSessionViews(activeIds) {
+      for (const [id, view] of sessionViews.entries()) {
+        if (id === DEFAULT_SESSION_ID || activeIds.has(id)) continue;
+        view.container.remove();
+        sessionViews.delete(id);
+      }
+      showActiveSessionView();
+    }
+
+    function clearPendingResponse(sessionId = activeSessionId) {
+      const view = sessionViews.get(viewIdFor(sessionId));
+      if (!view) return;
+      if (view.pendingBubble) {
+        view.pendingBubble.remove();
+        view.pendingBubble = null;
+      }
+      view.activityFeed = null;
+      updateEmptyState();
     }
 
     function updateActivePlaceholder() {
@@ -826,17 +917,18 @@
         status: normalizeSessionStatus(session.status || existing.status || 'ready'),
       });
       if (!activeSessionId) activeSessionId = session.sessionId;
+      ensureSessionView(session.sessionId);
     }
 
     function setActiveSession(sessionId, options = {}) {
       if (!sessionId || !sessions.has(sessionId)) return;
       activeSessionId = sessionId;
-      pendingBubble = null;
-      activityFeed = null;
+      ensureSessionView(sessionId);
+      showActiveSessionView({ scrollToBottom: true });
       renderTabs();
       updateActiveStatus();
       updateActivePlaceholder();
-      if (options.sync !== false) {
+      if (options.sync !== false && shouldSyncSessionView(sessionId)) {
         syncActiveHistory();
       }
     }
@@ -995,69 +1087,81 @@
           break;
 
         case 'history':
-          if (msg.sessionId && activeSessionId && msg.sessionId !== activeSessionId) break;
           renderHistory(msg);
           break;
 
         case 'run_started':
-          if (msg.sessionId && sessions.has(msg.sessionId)) {
-            sessions.get(msg.sessionId).status = 'working';
-            renderTabs();
-            if (msg.sessionId !== activeSessionId) break;
+          {
+            const sessionId = msg.sessionId || activeSessionId;
+            const view = getSessionView(sessionId);
+            clearPendingResponse(sessionId);
+
+            if (msg.sessionId && sessions.has(msg.sessionId)) {
+              sessions.get(msg.sessionId).status = 'working';
+              renderTabs();
+            }
+
+            if (!msg.sessionId || msg.sessionId === activeSessionId) {
+              isProcessing = true;
+              setStatus('busy', 'Working');
+            }
+
+            view.pendingBubble = addMessage('', 'assistant', { pending: true, sessionId });
+            view.activityFeed = document.createElement('div');
+            view.activityFeed.className = 'activity-feed';
+            view.pendingBubble.querySelector('.bubble').appendChild(view.activityFeed);
           }
-          isProcessing = true;
-          setStatus('busy', 'Working');
-          // Create pending bubble with activity feed
-          pendingBubble = addMessage('', 'assistant', { pending: true });
-          activityFeed = document.createElement('div');
-          activityFeed.className = 'activity-feed';
-          pendingBubble.querySelector('.bubble').appendChild(activityFeed);
           break;
 
         case 'step_started':
-          if (msg.sessionId && msg.sessionId !== activeSessionId) break;
-          if (activityFeed) {
-            const step = document.createElement('div');
-            step.className = 'activity-step active';
-            step.dataset.tool = msg.tool;
-            step.innerHTML = `<span class="step-icon">●</span><span>${escapeHtml(msg.description || msg.tool)}</span>`;
-            activityFeed.appendChild(step);
-            scrollToBottom();
+          {
+            const view = getSessionView(msg.sessionId || activeSessionId);
+            if (view.activityFeed) {
+              const step = document.createElement('div');
+              step.className = 'activity-step active';
+              step.dataset.tool = msg.tool;
+              step.innerHTML = `<span class="step-icon">●</span><span>${escapeHtml(msg.description || msg.tool)}</span>`;
+              view.activityFeed.appendChild(step);
+              if (!msg.sessionId || msg.sessionId === activeSessionId) scrollToBottom();
+            }
           }
           break;
 
         case 'step_finished':
-          if (msg.sessionId && msg.sessionId !== activeSessionId) break;
-          if (activityFeed) {
-            const activeStep = activityFeed.querySelector(`.activity-step.active[data-tool="${msg.tool}"]`);
-            if (activeStep) {
-              activeStep.classList.remove('active');
-              activeStep.classList.add('done');
-              activeStep.querySelector('.step-icon').textContent = '✓';
+          {
+            const view = getSessionView(msg.sessionId || activeSessionId);
+            if (view.activityFeed) {
+              const activeStep = view.activityFeed.querySelector(`.activity-step.active[data-tool="${msg.tool}"]`);
+              if (activeStep) {
+                activeStep.classList.remove('active');
+                activeStep.classList.add('done');
+                activeStep.querySelector('.step-icon').textContent = '✓';
+              }
             }
           }
           break;
 
         case 'text_done':
-          if (msg.sessionId && msg.sessionId !== activeSessionId) break;
-          if (pendingBubble) {
-            pendingBubble.remove();
-            pendingBubble = null;
-            activityFeed = null;
+          {
+            const sessionId = msg.sessionId || activeSessionId;
+            clearPendingResponse(sessionId);
+            addMessage(msg.fullText || 'No response', 'assistant', { sessionId });
+            if (!msg.sessionId || msg.sessionId === activeSessionId) {
+              isProcessing = false;
+              setStatus('online', 'Ready');
+            }
           }
-          addMessage(msg.fullText || 'No response', 'assistant');
-          isProcessing = false;
-          setStatus('online', 'Ready');
           break;
 
         case 'run_finished':
           if (msg.sessionId && sessions.has(msg.sessionId)) {
             sessions.get(msg.sessionId).status = 'ready';
             renderTabs();
-            if (msg.sessionId !== activeSessionId) break;
           }
-          isProcessing = false;
-          setStatus('online', 'Ready');
+          if (!msg.sessionId || msg.sessionId === activeSessionId) {
+            isProcessing = false;
+            setStatus('online', 'Ready');
+          }
           break;
 
         case 'run_error':
@@ -1065,22 +1169,20 @@
             recoverMissingSession(msg.sessionId, msg.sessions);
             break;
           }
-          if (msg.sessionId && msg.sessionId !== activeSessionId) {
-            if (sessions.has(msg.sessionId)) {
-              sessions.get(msg.sessionId).status = 'ready';
-              renderTabs();
-            }
-            break;
+          if (msg.sessionId && sessions.has(msg.sessionId)) {
+            sessions.get(msg.sessionId).status = 'ready';
+            renderTabs();
           }
-          clearPendingResponse();
-          addMessage('Error: ' + (msg.error || 'Something went wrong'), 'assistant');
-          isProcessing = false;
-          setStatus('error', 'Error');
+          clearPendingResponse(msg.sessionId || activeSessionId);
+          addMessage('Error: ' + (msg.error || 'Something went wrong'), 'assistant', { sessionId: msg.sessionId || activeSessionId });
+          if (!msg.sessionId || msg.sessionId === activeSessionId) {
+            isProcessing = false;
+            setStatus('error', 'Error');
+          }
           break;
 
         case 'proactive':
-          if (msg.sessionId && activeSessionId && msg.sessionId !== activeSessionId) break;
-          addMessage(msg.text, 'assistant');
+          addMessage(msg.text, 'assistant', { sessionId: msg.sessionId || activeSessionId });
           showToast('New message from Cal');
           break;
 
@@ -1097,12 +1199,10 @@
       sessions.clear();
       activeSessionId = null;
       for (const session of serverSessions) upsertSession(session);
-      if (previousActive && sessions.has(previousActive)) {
-        activeSessionId = previousActive;
-      }
-      if (!activeSessionId && serverSessions[0]) {
-        activeSessionId = serverSessions[0].sessionId;
-      }
+      activeSessionId = getFallbackSessionId(previousActive);
+      removeStaleSessionViews(new Set(serverSessions.map(session => session.sessionId)));
+      ensureSessionView(activeSessionId);
+      showActiveSessionView();
       renderTabs();
       updateActivePlaceholder();
       updateActiveStatus();
@@ -1111,7 +1211,7 @@
     async function recoverMissingSession(sessionId, serverSessions = null) {
       const wasActive = !sessionId || sessionId === activeSessionId;
       const missingName = sessions.get(sessionId)?.name || 'That Strand';
-      clearPendingResponse();
+      clearPendingResponse(sessionId || activeSessionId);
 
       if (Array.isArray(serverSessions) && serverSessions.length) {
         applySessions(serverSessions);
@@ -1127,9 +1227,9 @@
       }
 
       if (wasActive) {
-        const next = Array.from(sessions.values())[0];
-        if (next) {
-          setActiveSession(next.sessionId);
+        const nextSessionId = getFallbackSessionId();
+        if (nextSessionId) {
+          setActiveSession(nextSessionId);
         } else {
           activeSessionId = null;
           renderTabs();
@@ -1146,6 +1246,7 @@
 
     function renderHistory(data) {
       if (data.sessionId && !activeSessionId) {
+        migrateDefaultView(data.sessionId);
         upsertSession({
           sessionId: data.sessionId,
           name: 'Cal',
@@ -1154,7 +1255,9 @@
         });
         activeSessionId = data.sessionId;
       }
-      clearMessages();
+      const sessionId = data.sessionId || activeSessionId;
+      const view = getSessionView(sessionId);
+      clearMessages(sessionId);
       let dividerInserted = false;
       for (const message of data.messages || []) {
         if (!dividerInserted && !message.preReset) {
@@ -1163,39 +1266,43 @@
             const divider = document.createElement('div');
             divider.className = 'session-divider';
             divider.textContent = 'session refreshed';
-            messagesEl.appendChild(divider);
+            view.container.appendChild(divider);
           }
           dividerInserted = true;
         }
-        addMessage(message.content, message.role, { preReset: message.preReset });
+        addMessage(message.content, message.role, { preReset: message.preReset, sessionId });
       }
       const visibleCount = (data.messages || []).length;
-      setStatus('online', visibleCount ? visibleCount + ' messages' : 'Ready');
+      if (!data.sessionId || data.sessionId === activeSessionId) {
+        setStatus('online', visibleCount ? visibleCount + ' messages' : 'Ready');
+      }
     }
 
     // --- Send Message ---
     async function sendMessage() {
       const text = input.value.trim();
       if (!text) return;
+      const targetSessionId = activeSessionId;
+
       if (multiSessionEnabled && (!activeSessionId || !sessions.has(activeSessionId))) {
         await recoverMissingSession(activeSessionId);
         return;
       }
       if (isActiveProcessing()) {
         // Steering: send as steer event while Cal is working
-        wsSend({ type: 'steer', sessionId: activeSessionId, text });
-        addMessage(text, 'user');
+        wsSend({ type: 'steer', sessionId: targetSessionId, text });
+        addMessage(text, 'user', { sessionId: targetSessionId });
         input.value = '';
         autoSizeInput();
         showToast('Steering sent');
         return;
       }
 
-      addMessage(text, 'user');
+      addMessage(text, 'user', { sessionId: targetSessionId });
       input.value = '';
       autoSizeInput();
 
-      const sent = wsSend({ type: 'message', sessionId: activeSessionId, text });
+      const sent = wsSend({ type: 'message', sessionId: targetSessionId, text });
       if (!sent) {
         // Fallback to HTTP if WebSocket not connected
         sendMessageHttp(text);
@@ -1204,15 +1311,16 @@
     }
 
     async function sendMessageHttp(text) {
+      const targetSessionId = activeSessionId;
       isProcessing = true;
       input.disabled = true;
       setStatus('busy', 'Thinking');
-      const loading = addMessage('Cal is thinking...', 'assistant', { pending: true });
+      const loading = addMessage('Cal is thinking...', 'assistant', { pending: true, sessionId: targetSessionId });
 
       try {
         let response;
-        if (multiSessionEnabled && activeSessionId) {
-          response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(activeSessionId)}/message`), {
+        if (multiSessionEnabled && targetSessionId) {
+          response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(targetSessionId)}/message`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify({ message: text }),
@@ -1233,16 +1341,16 @@
         }
         const data = await readJsonResponse(response, 'Could not send message');
         loading.remove();
-        addMessage(data.message || 'No response', 'assistant');
-        setStatus('online', 'Ready');
+        addMessage(data.message || 'No response', 'assistant', { sessionId: targetSessionId });
+        if (!targetSessionId || targetSessionId === activeSessionId) setStatus('online', 'Ready');
       } catch (error) {
         loading.remove();
         if (error.data?.staleSession || isSessionMissingError(error.message)) {
-          await recoverMissingSession(activeSessionId, error.data?.sessions);
+          await recoverMissingSession(targetSessionId, error.data?.sessions);
           return;
         }
-        addMessage('Error: ' + (error.message || 'Could not reach Cal'), 'assistant');
-        setStatus('error', 'Offline');
+        addMessage('Error: ' + (error.message || 'Could not reach Cal'), 'assistant', { sessionId: targetSessionId });
+        if (!targetSessionId || targetSessionId === activeSessionId) setStatus('error', 'Offline');
       } finally {
         isProcessing = false;
         input.disabled = false;
@@ -1296,9 +1404,9 @@
         });
         const data = await readJsonResponse(response, `Could not close ${session.name}`);
         applySessions(data.sessions || []);
-        const next = Array.from(sessions.values())[0];
-        if (next) {
-          setActiveSession(next.sessionId);
+        const nextSessionId = getFallbackSessionId();
+        if (nextSessionId) {
+          setActiveSession(nextSessionId);
         }
         showToast(`${session.name} closed`);
       } catch (error) {
@@ -1526,12 +1634,19 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    function scrollActiveSessionToBottom() {
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
+    }
+
     function setEmptyVisible(isVisible) {
       emptyState.hidden = !isVisible;
     }
 
     function addMessage(text, role, options = {}) {
       setEmptyVisible(false);
+      const view = getSessionView(options.sessionId || activeSessionId);
       const row = document.createElement('article');
       row.className = 'message ' + role + (options.pending ? ' pending' : '') + (options.preReset ? ' pre-reset' : '');
       const bubble = document.createElement('div');
@@ -1544,14 +1659,18 @@
       }
 
       row.appendChild(bubble);
-      messagesEl.appendChild(row);
-      scrollToBottom();
+      view.container.appendChild(row);
+      updateEmptyState();
+      if (view.id === viewIdFor(activeSessionId)) scrollToBottom();
       return row;
     }
 
-    function clearMessages() {
-      [...messagesEl.querySelectorAll('.message, .session-divider')].forEach(node => node.remove());
-      setEmptyVisible(true);
+    function clearMessages(sessionId = activeSessionId) {
+      const view = getSessionView(sessionId);
+      [...view.container.querySelectorAll('.message, .session-divider')].forEach(node => node.remove());
+      view.pendingBubble = null;
+      view.activityFeed = null;
+      updateEmptyState();
     }
 
     function autoSizeInput() {
