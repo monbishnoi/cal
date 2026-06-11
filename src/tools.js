@@ -15,6 +15,7 @@ import { isFeatureEnabled, getFeatureConfig } from './features.js';
 import { getMCPClientManager } from './mcp-client.js';
 import { CAL_HOME, SCRIPTS_DIR } from './paths.js';
 import { checkMacFeature, isMacOS, isCommandAvailable, getCommandPath } from './detect.js';
+import { getActiveSessionManager, isMultiSessionEnabled } from './session-manager.js';
 
 const execAsync = promisify(exec);
 
@@ -389,6 +390,47 @@ export function getTools(options = {}) {
     });
   }
 
+  if (isMultiSessionEnabled()) {
+    tools.push(
+      {
+        name: 'inject_context',
+        description: 'Send context to another active Cal Strand by injecting it as steering context. Use only when the user explicitly asks to send or hand something to another session.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            target: {
+              type: 'string',
+              description: 'Target session name, such as "Strand", "Strand 2", or "Cal".',
+            },
+            context: {
+              type: 'string',
+              description: 'Context to inject into the target session.',
+            },
+          },
+          required: ['target', 'context'],
+        },
+      },
+      {
+        name: 'search_session',
+        description: 'Search another active Cal Strand conversation locally. Use only when the user explicitly asks what happened in another session.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            target: {
+              type: 'string',
+              description: 'Target session name, such as "Strand", "Strand 2", or "Cal".',
+            },
+            query: {
+              type: 'string',
+              description: 'Optional text to search for. If omitted, returns the last 10 messages.',
+            },
+          },
+          required: ['target'],
+        },
+      }
+    );
+  }
+
   if (includeMCP) {
     tools.push(...getExternalMCPTools(tools.map(tool => tool.name)));
   }
@@ -526,6 +568,26 @@ export async function executeToolCall(toolName, input) {
         throw new Error('QMD feature is not enabled. Run setup/qmd-setup.sh to enable semantic search.');
       }
       return await semanticSearch(input.query, input.mode, input.collection, input.limit);
+
+    case 'inject_context':
+      if (!isMultiSessionEnabled()) {
+        return 'Error: Multi-session Strands are not enabled.';
+      }
+      {
+        const manager = getActiveSessionManager();
+        if (!manager) return 'Error: No active session manager is available.';
+        return manager.injectContext(input.target, input.context);
+      }
+
+    case 'search_session':
+      if (!isMultiSessionEnabled()) {
+        return 'Error: Multi-session Strands are not enabled.';
+      }
+      {
+        const manager = getActiveSessionManager();
+        if (!manager) return 'Error: No active session manager is available.';
+        return manager.searchSession(input.target, input.query);
+      }
 
     default:
       {

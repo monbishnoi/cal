@@ -32,8 +32,9 @@ CAL keeps local memory, session history, handoffs, channels, scheduled routines,
 | **Owned Continuity** | Keep memory, sessions, handoffs, and routines in local state you control |
 | **Speed** | Generate morning briefs, end-of-day summaries, handoffs, and recurring routines |
 | **Omnipresence** | Use the same Cal from terminal, browser, PWA, Telegram, or iMessage |
+| **Strands** | Run up to 3 parallel PWA sessions alongside Cal home for focused work |
 | **Tool Use** | Let Claude call local and remote tools through a gateway you control |
-| **Auto Heal** | Optionally review local errors and write repair proposals before you apply anything (coming soon) |
+| **Auto Heal** | Optionally diagnose local gateway failures and apply approved fixes through a supervised PM2-backed workflow |
 
 ---
 
@@ -58,6 +59,10 @@ Cal does more than answer. It can read files, search local context, work with no
 Terminal when you are deep in code. Web browser when you want the richest local UI. Installable PWA when you want Cal on your phone without setting up a messaging bot. Tailscale when you want private access on the go. Telegram and iMessage are optional channels when messaging feels more natural.
 
 Same assistant, same local memory, different doors.
+
+### Lets you work in parallel.
+
+Turn on `MULTI_SESSION_ENABLED=true` to use Strands in the PWA. Cal home stays persistent, and you can open up to 3 temporary parallel Strands for focused tasks. Each Strand has its own conversation history and status, while sharing the same Cal identity, tools, and memory surfaces.
 
 ### Yours to configure.
 
@@ -84,6 +89,7 @@ Just talk to Cal:
 | Capability | What It Does |
 |------------|--------------|
 | **Conversation** | Chat naturally with Claude while Cal preserves session context |
+| **PWA Strands** | Run parallel PWA sessions for separate tasks without blocking Cal home |
 | **Calendar** | Read schedules and create events when configured |
 | **Mail** | Read and search mail through local setup scripts |
 | **Notes** | Read, write, and process notes |
@@ -91,7 +97,7 @@ Just talk to Cal:
 | **Telegram** | Use Cal privately through your own Telegram bot |
 | **iMessage** | Use Cal through local macOS messaging tools |
 | **Scheduled Jobs** | Run morning briefs, end-of-day summaries, handoffs, and memory consolidation |
-| **Auto Heal** | Disabled-by-default repair review that can summarize failures and propose fixes (coming soon) |
+| **Auto Heal** | Disabled-by-default diagnosis and supervised repair for recurring gateway failures |
 | **Web Search** | Search the web when an API key is configured |
 | **File Operations** | Read, write, and edit files on your machine |
 | **MCP Servers** | Connect approved Model Context Protocol servers, including optional external-service examples such as Google Workspace |

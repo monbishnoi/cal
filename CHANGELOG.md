@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added PWA Strands behind `MULTI_SESSION_ENABLED=true`: Cal home plus up to 3 parallel in-memory PWA sessions with independent histories, status tabs, close-summary writeback, stale-session recovery, and local cross-session tools (`inject_context`, `search_session`).
+- Added optional Auto Heal Level 1 diagnosis and Level 2 approved-fix surgery with PM2 rollback support.
 - Added a provider-neutral Google Workspace MCP example with Drive/Docs search, read, create, and non-destructive batch update tools.
 - Added per-server MCP tool allowlist/blocklist policy enforcement and write-confirmation docs for Google Docs writes.
 - Increased the PWA single-message input window to 50K characters with a live counter.
@@ -10,7 +12,7 @@
 - Added runtime lifecycle WebSocket events for PWA status/tool/response updates.
 - Added `src/test.js` runtime smoke tests covering event ordering, command handling, and HTTP/WebSocket flow.
 - Fixed queued PWA steering so guidance is injected before every model call, not only between tool iterations.
-- Kept the public package provider-neutral by removing old self-healing and provider-specific references from touched runtime/channel files.
+- Kept the public package provider-neutral while allowing the optional Auto Heal release surface.
 
 ## v1.0.0 - 2026-05-05
 

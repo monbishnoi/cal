@@ -14,9 +14,12 @@ const { conversationRuntime } = await import('./conversation-runtime.js');
 const { CalSession } = await import('./session.js');
 const {
   setSession,
+  setSessionManager,
   startHttpServer,
   stopHttpServer,
 } = await import('./http-server.js');
+const { SessionManager, setActiveSessionManager } = await import('./session-manager.js');
+const { getTools, executeToolCall } = await import('./tools.js');
 
 function createFakeSession(sessionId = 'test-main') {
   return {
@@ -53,6 +56,18 @@ function createFakeSession(sessionId = 'test-main') {
         text: response,
         usageStatus: this.getUsageStatus(),
       };
+    },
+  };
+}
+
+function createToolSession(sessionId, messages = []) {
+  return {
+    sessionId,
+    messages: [...messages],
+    steerQueue: [],
+    isProcessingMessage: false,
+    addSteer(text) {
+      this.steerQueue.push(text);
     },
   };
 }
@@ -215,9 +230,242 @@ async function testHttpWebSocketEndToEnd() {
     assert(received.some(msg => msg.type === 'status' && msg.state === 'processing'));
     assert(received.some(msg => msg.type === 'step_started' && msg.tool === 'test_tool'));
     assert(received.some(msg => msg.type === 'step_finished' && msg.tool === 'test_tool'));
+
+    const observerResponse = await fetch(`http://127.0.0.1:${port}/api/observer/sessions`);
+    assert.equal(observerResponse.status, 200);
+    const observerBody = await observerResponse.json();
+    assert.equal(observerBody.enabled, false);
+    assert.equal(observerBody.sessions.length, 1);
+    assert.equal(observerBody.sessions[0].sessionId, 'http-test');
   } finally {
     ws.close();
     stopHttpServer();
+  }
+}
+
+async function testMultiSessionEndpoints() {
+  process.env.MULTI_SESSION_ENABLED = 'true';
+  const session = createFakeSession('multi-home');
+  const manager = new SessionManager({ homeSession: session });
+  setSession(session);
+  setSessionManager(manager);
+
+  const server = await startHttpServer();
+  const port = server.address().port;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    const initial = await fetch(`${base}/api/sessions`);
+    assert.equal(initial.status, 200);
+    const initialBody = await initial.json();
+    assert.equal(initialBody.sessions.length, 1);
+    assert.equal(initialBody.sessions[0].name, 'Cal');
+
+    const created = [];
+    for (const expectedName of ['Strand', 'Strand 2', 'Strand 3']) {
+      const response = await fetch(`${base}/api/sessions`, { method: 'POST' });
+      assert.equal(response.status, 201);
+      const body = await response.json();
+      assert.equal(body.session.name, expectedName);
+      assert.equal(body.session.permanent, false);
+      created.push(body.session);
+    }
+
+    const tooMany = await fetch(`${base}/api/sessions`, { method: 'POST' });
+    assert.equal(tooMany.status, 409);
+
+    const deleted = await fetch(`${base}/api/sessions/${created[0].sessionId}`, { method: 'DELETE' });
+    assert.equal(deleted.status, 200);
+    const deletedBody = await deleted.json();
+    assert.equal(deletedBody.closed, true);
+    assert.equal(deletedBody.sessions.length, 3);
+
+    const staleMessage = await fetch(`${base}/api/sessions/${created[0].sessionId}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ message: 'hello missing strand' }),
+    });
+    assert.equal(staleMessage.status, 404);
+    const staleBody = await staleMessage.json();
+    assert.match(staleBody.error, /^Unknown session:/);
+    assert.equal(staleBody.staleSession, true);
+    assert.equal(staleBody.sessions.some(item => item.sessionId === created[0].sessionId), false);
+    assert.equal(staleBody.sessions.length, 3);
+
+    const observerResponse = await fetch(`${base}/api/observer/sessions`);
+    assert.equal(observerResponse.status, 200);
+    const observerBody = await observerResponse.json();
+    assert.equal(observerBody.enabled, true);
+    assert.deepEqual(observerBody.sessions.map(item => item.sessionId), [
+      'multi-home',
+      created[1].sessionId,
+      created[2].sessionId,
+    ]);
+    assert(observerBody.sessions.every(item => typeof item.sessionId === 'string'));
+    assert(observerBody.sessions.every(item => !('runtime' in item)));
+  } finally {
+    stopHttpServer();
+    setSessionManager(null);
+    setActiveSessionManager(null);
+    process.env.MULTI_SESSION_ENABLED = '';
+  }
+}
+
+async function testMultiSessionWebSocketTags() {
+  process.env.MULTI_SESSION_ENABLED = 'true';
+  const session = createFakeSession('multi-ws-home');
+  const manager = new SessionManager({ homeSession: session });
+  setSession(session);
+  setSessionManager(manager);
+
+  const server = await startHttpServer();
+  const port = server.address().port;
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const initialMessage = waitForWsMessage(ws);
+
+  try {
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve);
+      ws.once('error', reject);
+    });
+
+    const initial = await initialMessage;
+    assert.deepEqual(initial, { type: 'status', sessionId: 'multi-ws-home', state: 'idle' });
+
+    const received = [];
+    ws.on('message', raw => {
+      received.push(JSON.parse(raw.toString()));
+    });
+
+    ws.send(JSON.stringify({ type: 'message', sessionId: 'multi-ws-home', text: 'hello tagged websocket' }));
+
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timed out waiting for tagged WebSocket events')), 3000);
+      ws.on('message', () => {
+        const hasText = received.some(msg =>
+          msg.type === 'text_done' &&
+          msg.sessionId === 'multi-ws-home' &&
+          msg.fullText === 'Echo: hello tagged websocket'
+        );
+        if (hasText) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+  } finally {
+    ws.close();
+    stopHttpServer();
+    setSessionManager(null);
+    setActiveSessionManager(null);
+    process.env.MULTI_SESSION_ENABLED = '';
+  }
+}
+
+async function testMultiSessionUnknownWebSocketSessionRecovery() {
+  process.env.MULTI_SESSION_ENABLED = 'true';
+  const session = createFakeSession('multi-ws-recovery-home');
+  const manager = new SessionManager({ homeSession: session });
+  setSession(session);
+  setSessionManager(manager);
+
+  const server = await startHttpServer();
+  const port = server.address().port;
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const initialMessage = waitForWsMessage(ws);
+
+  try {
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve);
+      ws.once('error', reject);
+    });
+
+    await initialMessage;
+    ws.send(JSON.stringify({ type: 'message', sessionId: 'missing-strand', text: 'hello missing websocket strand' }));
+
+    const errorMessage = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timed out waiting for stale session error')), 2000);
+      ws.on('message', raw => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'run_error' && msg.sessionId === 'missing-strand') {
+          clearTimeout(timer);
+          resolve(msg);
+        }
+      });
+    });
+
+    assert.equal(errorMessage.error, 'No active session');
+    assert.equal(errorMessage.staleSession, true);
+    assert.deepEqual(errorMessage.sessions.map(item => item.sessionId), ['multi-ws-recovery-home']);
+  } finally {
+    ws.close();
+    stopHttpServer();
+    setSessionManager(null);
+    setActiveSessionManager(null);
+    process.env.MULTI_SESSION_ENABLED = '';
+  }
+}
+
+async function testCrossSessionToolsRegistrationAndExecution() {
+  const previousFlag = process.env.MULTI_SESSION_ENABLED;
+  try {
+    process.env.MULTI_SESSION_ENABLED = '';
+    assert.equal(getTools({ includeMCP: false }).some(tool => tool.name === 'inject_context'), false);
+    assert.equal(getTools({ includeMCP: false }).some(tool => tool.name === 'search_session'), false);
+
+    process.env.MULTI_SESSION_ENABLED = 'true';
+    const home = createToolSession('tool-home');
+    const strand = createToolSession('tool-strand', [
+      { role: 'user', content: 'Discuss the visa letter draft' },
+      { role: 'assistant', content: [{ type: 'text', text: 'We should keep it concise.' }] },
+      { role: 'user', content: 'Add salary confirmation details' },
+      { role: 'assistant', content: 'Done.' },
+    ]);
+
+    const manager = new SessionManager({ homeSession: home });
+    manager.sessions.set('tool-strand', {
+      sessionId: 'tool-strand',
+      name: 'Strand',
+      runtime: strand,
+      status: 'ready',
+      createdAt: Date.now(),
+      permanent: false,
+    });
+
+    const enabledTools = getTools({ includeMCP: false }).map(tool => tool.name);
+    assert(enabledTools.includes('inject_context'));
+    assert(enabledTools.includes('search_session'));
+
+    const injected = await executeToolCall('inject_context', {
+      target: 'Strand',
+      context: 'Please use the short agency version.',
+    });
+    assert.equal(injected, 'Injected context into Strand.');
+    assert.equal(strand.steerQueue.length, 1);
+    assert.match(strand.steerQueue[0], /Please use the short agency version/);
+
+    const searchResult = await executeToolCall('search_session', {
+      target: 'Strand',
+      query: 'salary',
+    });
+    const parsed = JSON.parse(searchResult);
+    assert.equal(parsed.name, 'Strand');
+    assert.equal(parsed.resultCount, 1);
+    assert.match(parsed.results[0].content, /salary confirmation/);
+
+    const recentResult = JSON.parse(await executeToolCall('search_session', {
+      target: 'Strand',
+    }));
+    assert.equal(recentResult.resultCount, 4);
+
+    const missing = await executeToolCall('search_session', {
+      target: 'Strand 9',
+      query: 'visa',
+    });
+    assert.match(missing, /^Error: No active session found/);
+  } finally {
+    setActiveSessionManager(null);
+    process.env.MULTI_SESSION_ENABLED = previousFlag || '';
   }
 }
 
@@ -226,6 +474,10 @@ try {
   await testConversationRuntimeEvents();
   await testCommandDoesNotCallModel();
   await testHttpWebSocketEndToEnd();
+  await testMultiSessionEndpoints();
+  await testMultiSessionWebSocketTags();
+  await testMultiSessionUnknownWebSocketSessionRecovery();
+  await testCrossSessionToolsRegistrationAndExecution();
   console.log('All Cal Gateway tests passed');
 } finally {
   stopHttpServer();

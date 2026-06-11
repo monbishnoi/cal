@@ -13,7 +13,7 @@ import { initSessionStore, flushToDisk } from './session-store.js';
 import { CalSession } from './session.js';
 import { initScheduler, stopScheduler, triggerJob, getJobStatus, loadJobs } from './scheduler.js';
 import { startIMessage, stopIMessage, sendMessage as sendIMessage, setSession as setIMessageSession } from './imessage.js';
-import { startHttpServer, stopHttpServer, getHttpPort, getHttpHost, setSession as setHttpSession, registerChannelSender, wsIsConnected } from './http-server.js';
+import { startHttpServer, stopHttpServer, getHttpPort, getHttpHost, setSession as setHttpSession, setSessionManager as setHttpSessionManager, registerChannelSender, wsIsConnected } from './http-server.js';
 import { routeOutput } from './output.js';
 import { sendWebPush } from './web-push.js';
 import { publishEvent } from './event-bus.js';
@@ -25,6 +25,7 @@ import { CAL_HOME } from './paths.js';
 import { getToday } from './context.js';
 import { getMainSessionId, getBackgroundSessionId, getTimezone } from './user-config.js';
 import { filterRuntimeMCPServers } from './runtime-config.js';
+import { SessionManager, isMultiSessionEnabled } from './session-manager.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -55,6 +56,7 @@ const BACKGROUND_SESSION_ID = getBackgroundSessionId();
 // Sessions (owned by gateway, shared with channels)
 let mainSession = null;
 let backgroundSession = null;
+let pwaSessionManager = null;
 
 // Telegram/iMessage enabled flags (set during startup)
 let telegramEnabled = false;
@@ -71,6 +73,16 @@ function getMainSession() {
     conversationRuntime.setDefaultSession(mainSession);
   }
   return mainSession;
+}
+
+function getPwaSessionManager() {
+  if (!isMultiSessionEnabled()) {
+    return null;
+  }
+  if (!pwaSessionManager) {
+    pwaSessionManager = new SessionManager({ homeSession: getMainSession() });
+  }
+  return pwaSessionManager;
 }
 
 /**
@@ -401,6 +413,7 @@ async function start() {
   setIMessageSession(session);
   registerChannelSender('imessage', sendIMessage);
   setHttpSession(session);
+  setHttpSessionManager(getPwaSessionManager());
   conversationRuntime.setDefaultSession(session);
 
   // 4. Initialize MCP clients (connect to configured MCP servers like QMD)

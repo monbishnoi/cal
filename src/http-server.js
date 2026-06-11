@@ -18,6 +18,7 @@ import { getAssistantConfig, getUserName } from './user-config.js';
 import { initWebPush, getVapidPublicKey, addSubscription, removeSubscription, sendWebPush, getSubscriptionCount } from './web-push.js';
 import { eventBus } from './event-bus.js';
 import { conversationRuntime } from './conversation-runtime.js';
+import { getActiveSessionManager, isMultiSessionEnabled } from './session-manager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PWA_DIR = join(__dirname, '..', 'clients', 'pwa');
@@ -31,6 +32,7 @@ let httpServer = null;
 
 // Session (set by gateway via setSession())
 let session = null;
+let sessionManager = null;
 const channelSenders = new Map();
 
 export function registerChannelSender(channel, sender) {
@@ -45,6 +47,10 @@ export function registerChannelSender(channel, sender) {
 export function setSession(s) {
   session = s;
   conversationRuntime.setDefaultSession(s);
+}
+
+export function setSessionManager(manager) {
+  sessionManager = manager || null;
 }
 
 /**
@@ -70,6 +76,28 @@ function broadcastToClients(event) {
   }
 }
 
+function withSessionId(payload, sessionId) {
+  if (sessionManager && isMultiSessionEnabled() && sessionId) {
+    return { ...payload, sessionId };
+  }
+  return payload;
+}
+
+function missingSessionPayload(sessionId, error = 'No active session') {
+  const payload = {
+    type: 'run_error',
+    sessionId,
+    error,
+    staleSession: true,
+  };
+
+  if (sessionManager && isMultiSessionEnabled()) {
+    payload.sessions = sessionManager.listActive();
+  }
+
+  return payload;
+}
+
 function mapRuntimeEventToWebSocket(event) {
   if (event.source === 'job' && event.type !== 'proactive') {
     return null;
@@ -77,43 +105,47 @@ function mapRuntimeEventToWebSocket(event) {
 
   switch (event.type) {
     case 'run_started':
-      return { type: 'run_started', runId: event.runId };
+      return withSessionId({ type: 'run_started', runId: event.runId }, event.sessionId);
     case 'status_changed':
-      return { type: 'status', state: event.payload?.state || 'idle' };
+      return withSessionId({ type: 'status', state: event.payload?.state || 'idle' }, event.sessionId);
     case 'tool_call_started':
-      return {
+      return withSessionId({
         type: 'step_started',
         runId: event.runId,
         tool: event.payload?.tool,
         description: event.payload?.description,
-      };
+      }, event.sessionId);
     case 'tool_call_finished':
-      return {
+      return withSessionId({
         type: 'step_finished',
         runId: event.runId,
         tool: event.payload?.tool,
-      };
+      }, event.sessionId);
     case 'response_complete':
-      return {
+      return withSessionId({
         type: 'text_done',
         runId: event.runId,
         fullText: event.payload?.text || '',
         messageId: event.payload?.messageId,
-      };
+      }, event.sessionId);
     case 'run_finished':
-      return { type: 'run_finished', runId: event.runId };
+      return withSessionId({ type: 'run_finished', runId: event.runId }, event.sessionId);
     case 'run_error':
-      return { type: 'run_error', runId: event.runId, error: event.payload?.error };
+      return withSessionId({ type: 'run_error', runId: event.runId, error: event.payload?.error }, event.sessionId);
     case 'proactive':
-      return { type: 'proactive', text: event.payload?.text || '', messageId: event.payload?.messageId };
+      return withSessionId({ type: 'proactive', text: event.payload?.text || '', messageId: event.payload?.messageId }, event.sessionId);
     case 'steer_ack':
-      return { type: 'steer_ack', text: event.payload?.text || '' };
+      return withSessionId({ type: 'steer_ack', text: event.payload?.text || '' }, event.sessionId);
     default:
       return null;
   }
 }
 
 eventBus.subscribeAll((event) => {
+  if (sessionManager && event.type === 'status_changed') {
+    sessionManager.setStatus(event.sessionId, event.payload?.state || 'idle');
+  }
+
   const wsEvent = mapRuntimeEventToWebSocket(event);
   if (wsEvent) {
     broadcastToClients(wsEvent);
@@ -134,9 +166,13 @@ function handleWsConnection(ws) {
   console.log(`[WS] Client connected (${wsClients.size + 1} total)`);
   wsClients.add(ws);
 
+  // Send actual session state on connect (not always 'idle')
   const currentSession = getSession();
   const state = currentSession?.isProcessingMessage ? 'processing' : 'idle';
-  ws.send(JSON.stringify({ type: 'status', state }));
+  ws.send(JSON.stringify(withSessionId({ type: 'status', state }, currentSession?.sessionId)));
+  if (sessionManager && isMultiSessionEnabled()) {
+    ws.send(JSON.stringify({ type: 'sessions', sessions: sessionManager.listActive() }));
+  }
 
   ws.on('message', (raw) => {
     let msg;
@@ -186,13 +222,15 @@ async function handleWsMessage(msg, ws) {
 async function handleWsChatMessage(msg, ws) {
   const userMessage = msg.text;
   if (!userMessage || !userMessage.trim()) {
-    ws.send(JSON.stringify({ type: 'run_error', error: 'Empty message' }));
+    ws.send(JSON.stringify({ type: 'run_error', sessionId: msg.sessionId, error: 'Empty message' }));
     return;
   }
 
-  const currentSession = getSession();
+  const currentSession = sessionManager && isMultiSessionEnabled()
+    ? sessionManager.getSession(msg.sessionId)
+    : getSession();
   if (!currentSession) {
-    ws.send(JSON.stringify({ type: 'run_error', error: 'No active session' }));
+    ws.send(JSON.stringify(missingSessionPayload(msg.sessionId)));
     return;
   }
 
@@ -209,7 +247,10 @@ async function handleWsChatMessage(msg, ws) {
 
 function handleWsSync(msg, ws) {
   const limit = HISTORY_LIMIT;
-  const history = getHydratableHistory(limit);
+  const targetSession = sessionManager && isMultiSessionEnabled()
+    ? sessionManager.getSession(msg.sessionId)
+    : getSession();
+  const history = getHydratableHistory(limit, targetSession);
   ws.send(JSON.stringify({ type: 'history', ...history }));
 }
 
@@ -217,7 +258,9 @@ function handleWsSteer(msg) {
   const text = msg.text?.trim();
   if (!text) return;
 
-  const currentSession = getSession();
+  const currentSession = sessionManager && isMultiSessionEnabled()
+    ? sessionManager.getSession(msg.sessionId)
+    : getSession();
   if (!currentSession) return;
 
   currentSession.addSteer(text);
@@ -255,8 +298,8 @@ function getTextContent(content) {
   return stripInjectedContext(text);
 }
 
-function getHydratableHistory(limit = HISTORY_LIMIT) {
-  const currentSession = getSession();
+function getHydratableHistory(limit = HISTORY_LIMIT, targetSession = getSession()) {
+  const currentSession = targetSession;
 
   if (!currentSession) {
     return {
@@ -305,12 +348,110 @@ function handleSessionHistory(url, res) {
   const limit = Number.isFinite(limitParam)
     ? Math.min(Math.max(limitParam, 1), 200)
     : HISTORY_LIMIT;
+  const targetSession = sessionManager && isMultiSessionEnabled()
+    ? sessionManager.getSession(url.searchParams.get('sessionId'))
+    : getSession();
 
   res.writeHead(200, {
     'Content-Type': 'application/json',
     'Cache-Control': 'no-store',
   });
-  res.end(JSON.stringify(getHydratableHistory(limit)));
+  res.end(JSON.stringify(getHydratableHistory(limit, targetSession)));
+}
+
+async function readJsonBody(req) {
+  let body = '';
+  for await (const chunk of req) {
+    body += chunk;
+  }
+  if (!body.trim()) return {};
+  return JSON.parse(body);
+}
+
+function writeJson(res, statusCode, payload) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function requireSessionManager(res) {
+  if (!isMultiSessionEnabled() || !sessionManager) {
+    res.writeHead(404);
+    res.end('Not found');
+    return null;
+  }
+  return sessionManager;
+}
+
+function toObserverSession(session, overrides = {}) {
+  return {
+    sessionId: session?.sessionId || 'unknown',
+    name: overrides.name || 'Cal',
+    status: session?.isProcessingMessage ? 'working' : 'ready',
+    permanent: overrides.permanent ?? true,
+    messageCount: session?.messages?.length || 0,
+  };
+}
+
+function handleObserverSessionsApi(res) {
+  const manager = sessionManager || getActiveSessionManager();
+  const sessions = manager && isMultiSessionEnabled()
+    ? manager.listObservationSessions().map(({ runtime, ...publicSession }) => publicSession)
+    : [toObserverSession(getSession())];
+
+  writeJson(res, 200, {
+    enabled: !!(manager && isMultiSessionEnabled()),
+    sessions,
+  });
+}
+
+async function handleSessionsApi(req, res, pathname) {
+  const manager = requireSessionManager(res);
+  if (!manager) return;
+
+  try {
+    if (pathname === '/api/sessions' && req.method === 'GET') {
+      writeJson(res, 200, { enabled: true, sessions: manager.listActive() });
+      return;
+    }
+
+    if (pathname === '/api/sessions' && req.method === 'POST') {
+      const created = manager.createSession();
+      broadcastToClients({ type: 'sessions', sessions: manager.listActive() });
+      writeJson(res, 201, { session: created, sessions: manager.listActive() });
+      return;
+    }
+
+    const messageMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/message$/);
+    if (messageMatch && req.method === 'POST') {
+      const sessionId = decodeURIComponent(messageMatch[1]);
+      const body = await readJsonBody(req);
+      const text = body.text || body.message || '';
+      const result = await manager.routeMessage(sessionId, text, { source: 'pwa' });
+      writeJson(res, 200, { sessionId, message: result.text, usageStatus: result.usageStatus || null });
+      return;
+    }
+
+    const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/);
+    if (sessionMatch && req.method === 'DELETE') {
+      const result = await manager.summarizeAndDestroy(decodeURIComponent(sessionMatch[1]));
+      broadcastToClients({ type: 'sessions', sessions: manager.listActive() });
+      writeJson(res, 200, { ...result, sessions: manager.listActive() });
+      return;
+    }
+
+    writeJson(res, 405, { error: 'Method not allowed' });
+  } catch (err) {
+    const statusCode = err.statusCode || (err instanceof SyntaxError ? 400 : 500);
+    const payload = { error: err.message };
+    if (statusCode === 404 && /^Unknown session:/.test(err.message)) {
+      payload.staleSession = true;
+      payload.sessions = manager.listActive();
+    }
+    writeJson(res, statusCode, payload);
+  }
 }
 
 /**
@@ -433,10 +574,7 @@ async function handleMessageSend(rpcRequest, res) {
 }
 
 /**
- * Handle A2A requests
- * Supports both:
- * 1. Standard A2A JSON-RPC (method: "message/send")
- * 2. Simple direct format ({message, contextId})
+ * Handle A2A JSON-RPC requests.
  */
 async function handleA2ARequest(req, res) {
   // Read request body
@@ -459,9 +597,7 @@ async function handleA2ARequest(req, res) {
     return;
   }
 
-  // Detect request format
   if (parsedBody.jsonrpc === '2.0' && parsedBody.method) {
-    // Standard A2A JSON-RPC format
     console.log(`[A2A] JSON-RPC request: ${parsedBody.method} (id: ${parsedBody.id})`);
 
     switch (parsedBody.method) {
@@ -487,58 +623,11 @@ async function handleA2ARequest(req, res) {
         }));
     }
   } else {
-    console.log(`[A2A] Direct request format detected`);
-    await handleDirectA2ARequest(parsedBody, res);
-  }
-}
-
-/**
- * Handle simple direct agent-request format.
- */
-async function handleDirectA2ARequest(requestBody, res) {
-  const userMessage = requestBody.message || requestBody.Message || '';
-  const contextId = requestBody.contextId || requestBody.contextID || `ctx-${randomUUID()}`;
-
-  if (!userMessage) {
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      message: 'Error: No message provided',
-      type: 'finalAnswer',
-      contextId,
-    }));
-    return;
-  }
-
-  console.log(`[A2A] Processing direct request: "${userMessage.substring(0, 50)}..." (context: ${contextId})`);
-
-  // Use shared session (set by gateway.js)
-  const session = getSession();
-
-  try {
-    const result = await conversationRuntime.handleUserMessage({
-      source: 'a2a-direct',
-      text: userMessage,
-      session,
-    });
-    const responseText = result.text;
-
-    console.log(`[A2A] Direct response ready (${responseText.length} chars)`);
-
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      message: responseText,
-      type: 'finalAnswer',
-      contextId: contextId,
-    }));
-
-  } catch (err) {
-    console.error(`[A2A] Error processing direct message:`, err.message);
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      message: `Error: ${err.message}`,
-      type: 'finalAnswer',
-      contextId: contextId,
+      jsonrpc: '2.0',
+      error: { code: -32600, message: 'Invalid request' },
+      id: parsedBody.id || null,
     }));
   }
 }
@@ -600,7 +689,7 @@ async function handleHttpRequest(req, res) {
 
   // CORS headers for cross-origin requests
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   // Handle CORS preflight
@@ -640,6 +729,16 @@ async function handleHttpRequest(req, res) {
   // API: Hydrate the web UI with the current shared session.
   if ((pathname === '/api/chat/history' || pathname === '/api/session/history') && req.method === 'GET') {
     handleSessionHistory(url, res);
+    return;
+  }
+
+  if (pathname === '/api/observer/sessions' && req.method === 'GET') {
+    handleObserverSessionsApi(res);
+    return;
+  }
+
+  if (pathname === '/api/sessions' || pathname.startsWith('/api/sessions/')) {
+    await handleSessionsApi(req, res, pathname);
     return;
   }
 

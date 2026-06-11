@@ -76,6 +76,10 @@
         var(--bg);
     }
 
+    #app.has-strands {
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+    }
+
     .topbar {
       position: relative;
       z-index: 4;
@@ -164,6 +168,120 @@
       width: 21px;
       height: 21px;
       stroke-width: 2;
+    }
+
+    .strand-tabs {
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 42px;
+      padding: 6px calc(12px + var(--safe-right)) 6px calc(12px + var(--safe-left));
+      overflow-x: auto;
+      background: rgba(16, 16, 20, 0.82);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      scrollbar-width: none;
+    }
+
+    .strand-tabs[hidden] {
+      display: none;
+    }
+
+    .strand-tabs::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+
+    .tabs-list {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .session-tab {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 74px;
+      height: 30px;
+      padding: 0 8px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .session-tab.active {
+      border-color: var(--border);
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .session-tab .tab-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .tab-dot {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: var(--accent-2);
+      box-shadow: 0 0 9px rgba(88, 199, 165, 0.65);
+    }
+
+    .session-tab.working .tab-dot {
+      background: var(--accent);
+      box-shadow: none;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    .close-tab {
+      display: none;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      margin-right: -3px;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--subtle);
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .session-tab:not(.permanent):hover .close-tab {
+      display: grid;
+    }
+
+    .close-tab:active {
+      background: rgba(244, 240, 234, 0.1);
+      color: var(--text);
+    }
+
+    .add-strand {
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .add-strand:disabled {
+      opacity: 0.45;
+      cursor: default;
     }
 
     .messages {
@@ -592,7 +710,12 @@
 <body>
   <div id="app">
     <header class="topbar">
-      <div aria-hidden="true"></div>
+      <button class="icon-button" id="topAddStrandBtn" type="button" aria-label="Open new Strand" title="Open new Strand" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+      </button>
       <div class="brand">
         <h1>Cal</h1>
         <div class="status" aria-live="polite">
@@ -609,6 +732,10 @@
         </svg>
       </button>
     </header>
+
+    <nav class="strand-tabs" id="strandTabs" aria-label="Cal sessions" hidden>
+      <div class="tabs-list" id="tabsList"></div>
+    </nav>
 
     <main class="messages" id="messages" aria-live="polite">
       <section class="empty" id="emptyState">
@@ -635,6 +762,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
+    const app = document.getElementById('app');
     const messagesEl = document.getElementById('messages');
     const emptyState = document.getElementById('emptyState');
     const input = document.getElementById('input');
@@ -645,14 +773,146 @@
     const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
     const toast = document.getElementById('toast');
+    const strandTabs = document.getElementById('strandTabs');
+    const tabsList = document.getElementById('tabsList');
+    const topAddStrandBtn = document.getElementById('topAddStrandBtn');
 
     let toastTimer = null;
     let isProcessing = false;
     let pendingBubble = null;
     let activityFeed = null;
+    let multiSessionEnabled = false;
+    let activeSessionId = null;
+    const sessions = new Map();
     const MAX_INPUT_CHARS = 50000;
     const TOKEN_ESTIMATE_CHARS = 4;
     input.maxLength = MAX_INPUT_CHARS;
+
+    function getActiveSession() {
+      return activeSessionId ? sessions.get(activeSessionId) : null;
+    }
+
+    function isActiveProcessing() {
+      return getActiveSession()?.status === 'working' || isProcessing;
+    }
+
+    function normalizeSessionStatus(state) {
+      return state === 'processing' || state === 'working' ? 'working' : 'ready';
+    }
+
+    function isSessionMissingError(error) {
+      return /No active session|Unknown session/i.test(String(error || ''));
+    }
+
+    function clearPendingResponse() {
+      if (pendingBubble) {
+        pendingBubble.remove();
+        pendingBubble = null;
+      }
+      activityFeed = null;
+    }
+
+    function updateActivePlaceholder() {
+      const active = getActiveSession();
+      input.placeholder = `Message ${active?.name || 'Cal'}...`;
+    }
+
+    function upsertSession(session) {
+      if (!session || !session.sessionId) return;
+      const existing = sessions.get(session.sessionId) || {};
+      sessions.set(session.sessionId, {
+        ...existing,
+        ...session,
+        status: normalizeSessionStatus(session.status || existing.status || 'ready'),
+      });
+      if (!activeSessionId) activeSessionId = session.sessionId;
+    }
+
+    function setActiveSession(sessionId, options = {}) {
+      if (!sessionId || !sessions.has(sessionId)) return;
+      activeSessionId = sessionId;
+      pendingBubble = null;
+      activityFeed = null;
+      renderTabs();
+      updateActiveStatus();
+      updateActivePlaceholder();
+      if (options.sync !== false) {
+        syncActiveHistory();
+      }
+    }
+
+    function renderTabs() {
+      const list = Array.from(sessions.values());
+      const strandCount = list.filter(item => !item.permanent).length;
+      const showTabs = multiSessionEnabled && list.length > 1;
+      strandTabs.hidden = !showTabs;
+      topAddStrandBtn.hidden = !multiSessionEnabled || strandCount >= 3;
+      topAddStrandBtn.disabled = strandCount >= 3;
+      app.classList.toggle('has-strands', showTabs);
+      tabsList.textContent = '';
+
+      for (const session of list) {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'session-tab ' +
+          (session.sessionId === activeSessionId ? 'active ' : '') +
+          (session.permanent ? 'permanent ' : '') +
+          (session.status === 'working' ? 'working' : 'ready');
+        tab.dataset.sessionId = session.sessionId;
+        tab.setAttribute('aria-label', session.name);
+        tab.innerHTML = `<span class="tab-dot"></span><span class="tab-name">${escapeHtml(session.name)}</span>`;
+
+        if (!session.permanent) {
+          const close = document.createElement('span');
+          close.className = 'close-tab';
+          close.textContent = '×';
+          close.setAttribute('aria-hidden', 'true');
+          tab.appendChild(close);
+        }
+
+        tab.addEventListener('click', event => {
+          if (event.target.closest('.close-tab')) {
+            closeSession(session.sessionId);
+            return;
+          }
+          setActiveSession(session.sessionId);
+        });
+
+        let pressTimer = null;
+        tab.addEventListener('pointerdown', () => {
+          if (session.permanent) return;
+          pressTimer = setTimeout(() => closeSession(session.sessionId), 650);
+        });
+        ['pointerup', 'pointerleave', 'pointercancel'].forEach(type => {
+          tab.addEventListener(type, () => {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+          });
+        });
+
+        tabsList.appendChild(tab);
+      }
+
+    }
+
+    function updateActiveStatus() {
+      const active = getActiveSession();
+      if (!active) {
+        isProcessing = false;
+        setStatus('error', 'No active session');
+        return;
+      }
+      isProcessing = active.status === 'working';
+      setStatus(isProcessing ? 'busy' : 'online', isProcessing ? 'Working' : 'Ready');
+    }
+
+    function syncActiveHistory() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'sync', sessionId: activeSessionId }));
+      } else {
+        loadHistoryHttp(activeSessionId);
+      }
+    }
 
     // --- WebSocket Connection ---
     const WS_ORIGIN = window.location.protocol === 'file:'
@@ -673,8 +933,9 @@
         console.log('[WS] Connected');
         wsReconnectDelay = 1000;
         setStatus('online', 'Connected');
+        loadSessions();
         // Request history sync on connect
-        ws.send(JSON.stringify({ type: 'sync' }));
+        ws.send(JSON.stringify({ type: 'sync', sessionId: activeSessionId }));
       });
 
       ws.addEventListener('message', (event) => {
@@ -713,7 +974,17 @@
     // --- Handle Server Events ---
     function handleServerEvent(msg) {
       switch (msg.type) {
+        case 'sessions':
+          applySessions(msg.sessions || []);
+          break;
+
         case 'status':
+          if (msg.sessionId && sessions.has(msg.sessionId)) {
+            const session = sessions.get(msg.sessionId);
+            session.status = normalizeSessionStatus(msg.state);
+            renderTabs();
+            if (msg.sessionId !== activeSessionId) break;
+          }
           if (msg.state === 'processing') {
             isProcessing = true;
             setStatus('busy', 'Working');
@@ -724,10 +995,16 @@
           break;
 
         case 'history':
+          if (msg.sessionId && activeSessionId && msg.sessionId !== activeSessionId) break;
           renderHistory(msg);
           break;
 
         case 'run_started':
+          if (msg.sessionId && sessions.has(msg.sessionId)) {
+            sessions.get(msg.sessionId).status = 'working';
+            renderTabs();
+            if (msg.sessionId !== activeSessionId) break;
+          }
           isProcessing = true;
           setStatus('busy', 'Working');
           // Create pending bubble with activity feed
@@ -738,6 +1015,7 @@
           break;
 
         case 'step_started':
+          if (msg.sessionId && msg.sessionId !== activeSessionId) break;
           if (activityFeed) {
             const step = document.createElement('div');
             step.className = 'activity-step active';
@@ -749,6 +1027,7 @@
           break;
 
         case 'step_finished':
+          if (msg.sessionId && msg.sessionId !== activeSessionId) break;
           if (activityFeed) {
             const activeStep = activityFeed.querySelector(`.activity-step.active[data-tool="${msg.tool}"]`);
             if (activeStep) {
@@ -760,6 +1039,7 @@
           break;
 
         case 'text_done':
+          if (msg.sessionId && msg.sessionId !== activeSessionId) break;
           if (pendingBubble) {
             pendingBubble.remove();
             pendingBubble = null;
@@ -771,22 +1051,35 @@
           break;
 
         case 'run_finished':
+          if (msg.sessionId && sessions.has(msg.sessionId)) {
+            sessions.get(msg.sessionId).status = 'ready';
+            renderTabs();
+            if (msg.sessionId !== activeSessionId) break;
+          }
           isProcessing = false;
           setStatus('online', 'Ready');
           break;
 
         case 'run_error':
-          if (pendingBubble) {
-            pendingBubble.remove();
-            pendingBubble = null;
-            activityFeed = null;
+          if (msg.staleSession || isSessionMissingError(msg.error)) {
+            recoverMissingSession(msg.sessionId, msg.sessions);
+            break;
           }
+          if (msg.sessionId && msg.sessionId !== activeSessionId) {
+            if (sessions.has(msg.sessionId)) {
+              sessions.get(msg.sessionId).status = 'ready';
+              renderTabs();
+            }
+            break;
+          }
+          clearPendingResponse();
           addMessage('Error: ' + (msg.error || 'Something went wrong'), 'assistant');
           isProcessing = false;
           setStatus('error', 'Error');
           break;
 
         case 'proactive':
+          if (msg.sessionId && activeSessionId && msg.sessionId !== activeSessionId) break;
           addMessage(msg.text, 'assistant');
           showToast('New message from Cal');
           break;
@@ -797,7 +1090,70 @@
       }
     }
 
+    function applySessions(serverSessions) {
+      if (!serverSessions.length) return;
+      multiSessionEnabled = true;
+      const previousActive = activeSessionId;
+      sessions.clear();
+      activeSessionId = null;
+      for (const session of serverSessions) upsertSession(session);
+      if (previousActive && sessions.has(previousActive)) {
+        activeSessionId = previousActive;
+      }
+      if (!activeSessionId && serverSessions[0]) {
+        activeSessionId = serverSessions[0].sessionId;
+      }
+      renderTabs();
+      updateActivePlaceholder();
+      updateActiveStatus();
+    }
+
+    async function recoverMissingSession(sessionId, serverSessions = null) {
+      const wasActive = !sessionId || sessionId === activeSessionId;
+      const missingName = sessions.get(sessionId)?.name || 'That Strand';
+      clearPendingResponse();
+
+      if (Array.isArray(serverSessions) && serverSessions.length) {
+        applySessions(serverSessions);
+      } else {
+        await loadSessions();
+      }
+
+      if (sessionId && sessions.has(sessionId)) {
+        sessions.get(sessionId).status = 'ready';
+        renderTabs();
+        updateActiveStatus();
+        return;
+      }
+
+      if (wasActive) {
+        const next = Array.from(sessions.values())[0];
+        if (next) {
+          setActiveSession(next.sessionId);
+        } else {
+          activeSessionId = null;
+          renderTabs();
+          updateActivePlaceholder();
+          setStatus('error', 'No active session');
+        }
+        showToast(`${missingName} is no longer active. Switched back to Cal.`);
+      }
+
+      isProcessing = false;
+      input.disabled = false;
+      autoSizeInput();
+    }
+
     function renderHistory(data) {
+      if (data.sessionId && !activeSessionId) {
+        upsertSession({
+          sessionId: data.sessionId,
+          name: 'Cal',
+          status: 'ready',
+          permanent: true,
+        });
+        activeSessionId = data.sessionId;
+      }
       clearMessages();
       let dividerInserted = false;
       for (const message of data.messages || []) {
@@ -818,12 +1174,16 @@
     }
 
     // --- Send Message ---
-    function sendMessage() {
+    async function sendMessage() {
       const text = input.value.trim();
       if (!text) return;
-      if (isProcessing) {
+      if (multiSessionEnabled && (!activeSessionId || !sessions.has(activeSessionId))) {
+        await recoverMissingSession(activeSessionId);
+        return;
+      }
+      if (isActiveProcessing()) {
         // Steering: send as steer event while Cal is working
-        wsSend({ type: 'steer', text });
+        wsSend({ type: 'steer', sessionId: activeSessionId, text });
         addMessage(text, 'user');
         input.value = '';
         autoSizeInput();
@@ -835,7 +1195,7 @@
       input.value = '';
       autoSizeInput();
 
-      const sent = wsSend({ type: 'message', text });
+      const sent = wsSend({ type: 'message', sessionId: activeSessionId, text });
       if (!sent) {
         // Fallback to HTTP if WebSocket not connected
         sendMessageHttp(text);
@@ -850,17 +1210,26 @@
       const loading = addMessage('Cal is thinking...', 'assistant', { pending: true });
 
       try {
-        let response = await fetch(apiUrl('/api/chat/send'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ message: text }),
-        });
-        if (response.status === 404) {
-          response = await fetch(apiUrl('/'), {
+        let response;
+        if (multiSessionEnabled && activeSessionId) {
+          response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(activeSessionId)}/message`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify({ message: text }),
           });
+        } else {
+          response = await fetch(apiUrl('/api/chat/send'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ message: text }),
+          });
+          if (response.status === 404) {
+            response = await fetch(apiUrl('/'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ message: text }),
+            });
+          }
         }
         const data = await readJsonResponse(response, 'Could not send message');
         loading.remove();
@@ -868,6 +1237,10 @@
         setStatus('online', 'Ready');
       } catch (error) {
         loading.remove();
+        if (error.data?.staleSession || isSessionMissingError(error.message)) {
+          await recoverMissingSession(activeSessionId, error.data?.sessions);
+          return;
+        }
         addMessage('Error: ' + (error.message || 'Could not reach Cal'), 'assistant');
         setStatus('error', 'Offline');
       } finally {
@@ -875,6 +1248,74 @@
         input.disabled = false;
         autoSizeInput();
         input.focus({ preventScroll: true });
+      }
+    }
+
+    async function loadSessions() {
+      try {
+        const response = await fetch(apiUrl('/api/sessions'), {
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        applySessions(data.sessions || []);
+      } catch {
+        // Feature flag is probably off or the gateway is offline.
+      }
+    }
+
+    async function createStrand() {
+      if (!multiSessionEnabled) return;
+      topAddStrandBtn.disabled = true;
+      try {
+        const response = await fetch(apiUrl('/api/sessions'), {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        });
+        const data = await readJsonResponse(response, 'Could not create Strand');
+        applySessions(data.sessions || []);
+        if (data.session?.sessionId) {
+          setActiveSession(data.session.sessionId);
+        }
+      } catch (error) {
+        showToast(error.message || 'Could not create Strand');
+      } finally {
+        renderTabs();
+      }
+    }
+
+    async function closeSession(sessionId) {
+      const session = sessions.get(sessionId);
+      if (!session || session.permanent) return;
+      if (!window.confirm(`Close ${session.name}?`)) return;
+
+      try {
+        const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(sessionId)}`), {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        });
+        const data = await readJsonResponse(response, `Could not close ${session.name}`);
+        applySessions(data.sessions || []);
+        const next = Array.from(sessions.values())[0];
+        if (next) {
+          setActiveSession(next.sessionId);
+        }
+        showToast(`${session.name} closed`);
+      } catch (error) {
+        showToast(error.message || `Could not close ${session.name}`);
+      }
+    }
+
+    async function loadHistoryHttp(sessionId) {
+      try {
+        const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+        const response = await fetch(apiUrl('/api/session/history' + query), {
+          headers: { Accept: 'application/json' },
+        });
+        const data = await readJsonResponse(response, 'Could not load session');
+        renderHistory(data);
+      } catch (error) {
+        showToast(error.message || 'Could not load session');
       }
     }
 
@@ -1057,17 +1498,28 @@
 
     async function readJsonResponse(response, fallbackMessage) {
       const text = await response.text();
+      let data = null;
+
+      if (text.trim()) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = null;
+        }
+      }
 
       if (!response.ok) {
-        const detail = text.trim() || response.statusText || fallbackMessage;
-        throw new Error(detail);
+        const detail = data?.error || text.trim() || response.statusText || fallbackMessage;
+        const error = new Error(detail);
+        error.data = data;
+        throw error;
       }
 
-      try {
-        return text ? JSON.parse(text) : {};
-      } catch {
+      if (!text.trim()) return {};
+      if (!data) {
         throw new Error(fallbackMessage + ': server returned non-JSON text');
       }
+      return data;
     }
 
     function scrollToBottom() {
@@ -1139,10 +1591,14 @@
 
     refreshBtn.addEventListener('click', () => {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'sync' }));
+        ws.send(JSON.stringify({ type: 'sync', sessionId: activeSessionId }));
+      } else {
+        loadHistoryHttp(activeSessionId);
       }
       showToast('Session refreshed');
     });
+
+    topAddStrandBtn.addEventListener('click', createStrand);
 
     window.addEventListener('online', () => {
       setStatus('online', 'Online');
@@ -1229,6 +1685,7 @@
     navigator.serviceWorker?.ready.then(() => showPushBanner());
 
     // --- Boot ---
+    loadSessions();
     wsConnect();
     autoSizeInput();
   </script>

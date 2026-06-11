@@ -28,8 +28,9 @@ const THRESHOLD_MID_TOOL_HANDOFF = 0.85;  // 85% - schedule early handoff after 
 const MAX_MID_LOOP_RESETS = 3;  // Safety limit to prevent infinite handoff loops
 
 export class CalSession {
-  constructor(sessionId) {
+  constructor(sessionId, options = {}) {
     this.sessionId = sessionId;
+    this.persistEnabled = options.persist !== false;
     this.messages = [];
     this.isInitialized = false;
     this.systemPrompt = null;
@@ -59,8 +60,10 @@ export class CalSession {
 
     this.model = MODEL;
 
-    // Try to restore from disk
-    this.restoreFromDisk();
+    // Try to restore from disk for persistent sessions.
+    if (this.persistEnabled) {
+      this.restoreFromDisk();
+    }
   }
 
   /**
@@ -95,6 +98,7 @@ export class CalSession {
    * Persist session state to disk
    */
   persistToDisk() {
+    if (!this.persistEnabled) return;
     saveSession(this.sessionId, {
       messages: this.messages,
       systemPrompt: this.systemPrompt,
