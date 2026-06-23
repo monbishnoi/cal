@@ -101,6 +101,7 @@ Just talk to Cal:
 | **Web Search** | Search the web when an API key is configured |
 | **File Operations** | Read, write, and edit files on your machine |
 | **MCP Servers** | Connect approved Model Context Protocol servers, including optional external-service examples such as Google Workspace |
+| **Codex Delegation** | Optionally delegate coding tasks to Codex in a dedicated PWA Strand |
 
 All of this happens through conversation and explicit configuration.
 
@@ -120,6 +121,18 @@ All of this happens through conversation and explicit configuration.
 You configure the parts you want. The rest can stay off.
 
 Optional MCP examples include [Google Workspace MCP](docs/google-workspace-mcp.md), which exposes a narrow Drive/Docs surface with write confirmation.
+
+### Optional Codex Delegation
+
+Set `CODEX_ENABLED=true` and `MULTI_SESSION_ENABLED=true` to expose `codex_send` and `codex_check`. `codex_send` returns immediately, runs Codex in the background through `@openai/codex-sdk`, and routes completion into a dedicated `Codex` Strand instead of interrupting Cal home.
+
+To keep all delegations in one visible Codex Desktop thread, set:
+
+```bash
+CODEX_DEFAULT_THREAD_ID="<codex-thread-id>"
+```
+
+If no thread ID is provided, Cal starts a new Codex thread. If a configured or explicit thread cannot be resumed, Cal falls back to a new thread and stores the resulting ID in the Strand metadata.
 
 ---
 

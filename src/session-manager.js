@@ -17,6 +17,7 @@ export const HOME_SESSION_ID = 'cal-home';
 export const MAX_STRANDS = 3;
 
 let activeSessionManager = null;
+let sessionMessageInterceptor = null;
 
 export function isMultiSessionEnabled() {
   return String(process.env.MULTI_SESSION_ENABLED || '').toLowerCase() === 'true';
@@ -28,6 +29,10 @@ export function setActiveSessionManager(manager) {
 
 export function getActiveSessionManager() {
   return activeSessionManager;
+}
+
+export function setSessionMessageInterceptor(interceptor) {
+  sessionMessageInterceptor = typeof interceptor === 'function' ? interceptor : null;
 }
 
 function normalizeName(value) {
@@ -122,20 +127,22 @@ export class SessionManager {
       status: session.isProcessingMessage ? 'working' : 'ready',
       createdAt: Date.now(),
       permanent: true,
+      metadata: {},
     });
     conversationRuntime.setDefaultSession(session);
   }
 
-  createSession() {
+  createSession(options = {}) {
     const activeStrands = this.listActive().filter(item => !item.permanent);
-    if (activeStrands.length >= this.maxStrands) {
+    if (!options.skipLimit && activeStrands.length >= this.maxStrands) {
       const err = new Error(`Maximum Strand limit reached (${this.maxStrands})`);
       err.statusCode = 409;
       throw err;
     }
 
     const number = activeStrands.length + 1;
-    const name = number === 1 ? 'Strand' : `Strand ${number}`;
+    const requestedName = String(options.name || '').trim();
+    const name = requestedName || (number === 1 ? 'Strand' : `Strand ${number}`);
     const sessionId = `strand-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const runtime = new CalSession(sessionId, { persist: false });
 
@@ -146,11 +153,60 @@ export class SessionManager {
       status: 'ready',
       createdAt: Date.now(),
       permanent: false,
+      metadata: options.metadata || {},
     };
 
     this.sessions.set(sessionId, record);
     conversationRuntime.registerSession(runtime);
     return this.toPublicSession(record);
+  }
+
+  appendAssistantMessage(sessionId, text) {
+    const record = this.getRecord(sessionId);
+    if (!record?.runtime) {
+      const err = new Error(`Unknown session: ${sessionId}`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const messageText = String(text || '').trim();
+    if (!messageText) return;
+
+    record.runtime.messages.push({
+      role: 'assistant',
+      content: [{ type: 'text', text: messageText }],
+    });
+  }
+
+  appendUserMessage(sessionId, text) {
+    const record = this.getRecord(sessionId);
+    if (!record?.runtime) {
+      const err = new Error(`Unknown session: ${sessionId}`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const messageText = String(text || '').trim();
+    if (!messageText) return;
+
+    record.runtime.messages.push({
+      role: 'user',
+      content: messageText,
+    });
+  }
+
+  setMetadata(sessionId, metadata = {}) {
+    const record = this.getRecord(sessionId);
+    if (!record) return null;
+    record.metadata = {
+      ...(record.metadata || {}),
+      ...metadata,
+    };
+    return record.metadata;
+  }
+
+  getMetadata(sessionId) {
+    return this.getRecord(sessionId)?.metadata || {};
   }
 
   getSession(sessionId) {
@@ -226,11 +282,26 @@ export class SessionManager {
   }
 
   async routeMessage(sessionId, text, options = {}) {
-    const session = this.getSession(sessionId);
+    const record = this.getRecord(sessionId);
+    const session = record?.runtime || null;
     if (!session) {
       const err = new Error(`Unknown session: ${sessionId}`);
       err.statusCode = 404;
       throw err;
+    }
+
+    if (sessionMessageInterceptor) {
+      const intercepted = await sessionMessageInterceptor({
+        manager: this,
+        record,
+        session,
+        sessionId: session.sessionId,
+        text,
+        options,
+      });
+      if (intercepted?.handled) {
+        return intercepted.result;
+      }
     }
 
     return conversationRuntime.handleUserMessage({

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added optional generic Codex delegation behind `CODEX_ENABLED=true` and `MULTI_SESSION_ENABLED=true`, including `codex_send`, `codex_check`, configurable `CODEX_DEFAULT_THREAD_ID`, and a dedicated `Codex` Strand for background completion.
 - Fixed PWA Strands tab rendering so inactive Strand runtime events render into their own session containers and tab switching opens at the latest messages.
 - Added PWA Strands behind `MULTI_SESSION_ENABLED=true`: Cal home plus up to 3 parallel in-memory PWA sessions with independent histories, status tabs, close-summary writeback, stale-session recovery, and local cross-session tools (`inject_context`, `search_session`).
 - Added optional Auto Heal Level 1 diagnosis and Level 2 approved-fix surgery with PM2 rollback support.

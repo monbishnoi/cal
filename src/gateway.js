@@ -26,6 +26,7 @@ import { getToday } from './context.js';
 import { getMainSessionId, getBackgroundSessionId, getTimezone } from './user-config.js';
 import { filterRuntimeMCPServers } from './runtime-config.js';
 import { SessionManager, isMultiSessionEnabled } from './session-manager.js';
+import { initializeCodexBridge, validateCodexStartupConfig, isCodexEnabled } from './codex-bridge.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -381,6 +382,13 @@ async function executeJob(job) {
  * Start the gateway daemon
  */
 async function start() {
+  try {
+    validateCodexStartupConfig();
+  } catch (err) {
+    console.error(`[Gateway] ${err.message}`);
+    process.exit(1);
+  }
+
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║                    CAL GATEWAY v${VERSION}                        ║
@@ -415,6 +423,16 @@ async function start() {
   setHttpSession(session);
   setHttpSessionManager(getPwaSessionManager());
   conversationRuntime.setDefaultSession(session);
+
+  if (isCodexEnabled()) {
+    console.log('[Gateway] Initializing Codex bridge...');
+    const codexStatus = await initializeCodexBridge();
+    if (codexStatus.ok) {
+      console.log('[Gateway] Codex bridge ready');
+    } else {
+      console.warn(`[Gateway] Codex bridge unavailable: ${codexStatus.error}`);
+    }
+  }
 
   // 4. Initialize MCP clients (connect to configured MCP servers like QMD)
   console.log('[Gateway] Connecting to MCP servers...');

@@ -12,7 +12,12 @@ Cal combines conversation, local tools, scheduled jobs, reusable skills, and use
 | Scheduled jobs | Off | Enabled per job in `config/jobs.json` |
 | MCP servers | Off | Generic, profile-aware, and explicitly enabled |
 | QMD search | Off | Optional local semantic search setup |
+| Codex delegation | Off | Optional `@openai/codex-sdk` bridge; requires `CODEX_ENABLED=true` and `MULTI_SESSION_ENABLED=true` |
 | Auto Heal review | Off | Proposal-only repair review in the public template |
+
+## Codex Delegation
+
+When enabled, Cal registers `codex_send` and `codex_check`. `codex_send` starts background Codex work and writes progress/results to a dedicated `Codex` Strand. Set `CODEX_DEFAULT_THREAD_ID` if you want Cal to reuse one visible Codex Desktop thread by default; otherwise each delegation can start a new thread or use an explicit `threadId`.
 
 ## Auto Heal Review
 

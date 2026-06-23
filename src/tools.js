@@ -16,6 +16,7 @@ import { getMCPClientManager } from './mcp-client.js';
 import { CAL_HOME, SCRIPTS_DIR } from './paths.js';
 import { checkMacFeature, isMacOS, isCommandAvailable, getCommandPath } from './detect.js';
 import { getActiveSessionManager, isMultiSessionEnabled } from './session-manager.js';
+import { isCodexEnabled, sendCodexTask, checkCodex } from './codex-bridge.js';
 
 const execAsync = promisify(exec);
 
@@ -431,6 +432,60 @@ export function getTools(options = {}) {
     );
   }
 
+  if (isCodexEnabled()) {
+    tools.push(
+      {
+        name: 'codex_send',
+        description: 'Delegate a coding task to Codex in the background. Returns immediately with a task handle; completion is routed to the Codex Strand. Pass threadId to resume a Codex thread, or set CODEX_DEFAULT_THREAD_ID to make one persistent thread the default.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task: {
+              type: 'string',
+              description: 'The task to delegate (what to do, not how).',
+            },
+            project: {
+              type: 'string',
+              description: 'Working directory path for the task.',
+            },
+            threadId: {
+              type: 'string',
+              description: 'Optional Codex thread ID to resume. If omitted, Cal uses CODEX_DEFAULT_THREAD_ID when configured, otherwise starts a new Codex thread.',
+            },
+            sandbox: {
+              type: 'string',
+              enum: ['restricted', 'full'],
+              default: 'restricted',
+              description: "Sandbox mode. Use 'full' for tasks requiring browser, Computer Use, or network access.",
+            },
+          },
+          required: ['task', 'project'],
+        },
+      },
+      {
+        name: 'codex_check',
+        description: 'Check Codex delegation status or thread history. Use list=true for recent threads or threadId for a specific thread summary.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            threadId: {
+              type: 'string',
+              description: 'Specific Codex thread ID to check.',
+            },
+            list: {
+              type: 'boolean',
+              description: 'List recent Codex threads.',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of threads to list (default 10).',
+            },
+          },
+        },
+      }
+    );
+  }
+
   if (includeMCP) {
     tools.push(...getExternalMCPTools(tools.map(tool => tool.name)));
   }
@@ -588,6 +643,12 @@ export async function executeToolCall(toolName, input) {
         if (!manager) return 'Error: No active session manager is available.';
         return manager.searchSession(input.target, input.query);
       }
+
+    case 'codex_send':
+      return await sendCodexTask(input || {});
+
+    case 'codex_check':
+      return checkCodex(input || {});
 
     default:
       {
