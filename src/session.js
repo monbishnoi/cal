@@ -118,7 +118,7 @@ export class CalSession {
     console.log(`[Session ${this.sessionId}] Initializing session...`);
 
     // Load CAL.md, MEMORY.md, USER.md as system prompt
-    this.systemPrompt = loadSystemPrompt();
+    this.systemPrompt = loadSystemPrompt(this.sessionId);
 
     this.isInitialized = true;
     console.log(`[Session ${this.sessionId}] Session initialized with ${this.messages.length} messages`);

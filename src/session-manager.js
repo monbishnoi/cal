@@ -12,6 +12,7 @@ import { deleteSession } from './session-store.js';
 import { conversationRuntime } from './conversation-runtime.js';
 import { MEMORY_DIR } from './paths.js';
 import { getToday } from './context.js';
+import { writeActiveContext } from './session-bridge.js';
 
 export const HOME_SESSION_ID = 'cal-home';
 export const MAX_STRANDS = 3;
@@ -346,6 +347,14 @@ export class SessionManager {
       const closedAt = new Date().toLocaleString();
       appendToDailyLog(`\n\n### Strand closed - ${record.name}\n\nClosed: ${closedAt}\n\n${summary}\n`);
     }
+
+    writeActiveContext(record, {
+      closed: true,
+      summary: summary || fallbackSummary(session),
+      status: 'closed',
+      currentStep: 'Strand closed.',
+      reason: 'strand_close',
+    });
 
     this.sessions.delete(sessionId);
     deleteSession(sessionId);

@@ -1,6 +1,6 @@
 {
   "name": "cal-gateway",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Cal Gateway - Local-first AI thinking partner",
   "type": "module",
   "main": "src/gateway.js",

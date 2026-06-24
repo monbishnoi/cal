@@ -11,12 +11,17 @@ import { join } from 'path';
 import { CAL_HOME, MEMORY_DIR, CONTEXT_DIR, DATA_DIR } from './paths.js';
 import { getTimezone, getLocale } from './user-config.js';
 
-const LAST_HANDOFF_PATH = join(DATA_DIR, 'last-handoff.json');
+const DEFAULT_LAST_HANDOFF_PATH = join(DATA_DIR, 'last-handoff.json');
+let lastHandoffPath = process.env.CAL_LAST_HANDOFF_PATH || DEFAULT_LAST_HANDOFF_PATH;
+
+export function __setLastHandoffPathForTest(path) {
+  lastHandoffPath = path || DEFAULT_LAST_HANDOFF_PATH;
+}
 
 /**
  * Load system prompt from Harness directory
  */
-export function loadSystemPrompt() {
+export function loadSystemPrompt(sessionId = null) {
   const parts = [];
 
   // 1. Load CAL.md (Cal's identity/soul)
@@ -50,7 +55,7 @@ export function loadSystemPrompt() {
   }
 
   // 5. Session Bridge: Load restoration context if recent handoff exists
-  const restorationContext = getRestorationContextFromFile();
+  const restorationContext = getRestorationContextFromFile(sessionId);
   if (restorationContext) {
     parts.push('\n\n' + restorationContext);
   }
@@ -67,13 +72,13 @@ export function loadSystemPrompt() {
  *
  * Simplified: Just timestamp + summary, no delta or continuation prompt
  */
-function getRestorationContextFromFile() {
+function getRestorationContextFromFile(sessionId = null) {
   try {
-    if (!existsSync(LAST_HANDOFF_PATH)) {
+    if (!existsSync(lastHandoffPath)) {
       return null;
     }
 
-    const handoffData = JSON.parse(readFileSync(LAST_HANDOFF_PATH, 'utf8'));
+    const handoffData = normalizeHandoffData(JSON.parse(readFileSync(lastHandoffPath, 'utf8')));
 
     if (!handoffData || !handoffData.timestamp) {
       return null;
@@ -90,21 +95,131 @@ function getRestorationContextFromFile() {
 
     console.log(`[Context] Session Bridge: Restoring context from handoff ${hoursSinceHandoff.toFixed(1)} hours ago`);
 
-    // Simple restoration context - just where we left off
-    const context = `# Session Bridge — Continuing from Previous Session
+    const context = formatRestorationContext(handoffData, sessionId, handoffTime);
 
-**Last session ended:** ${handoffTime.toLocaleString(getLocale(), { timeZone: getTimezone() })}
-
-## Where We Left Off
-${handoffData.summary || 'No summary available'}
-`;
-
-    return context;
+    return context || null;
 
   } catch (err) {
     console.error(`[Context] Failed to load handoff data:`, err.message);
     return null;
   }
+}
+
+function normalizeHandoffData(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.sessions && typeof raw.sessions === 'object') {
+    return {
+      timestamp: raw.timestamp || new Date().toISOString(),
+      sessions: raw.sessions,
+      slimContext: raw.slimContext || {},
+    };
+  }
+
+  const timestamp = raw.timestamp || new Date().toISOString();
+  return {
+    timestamp,
+    sessions: {
+      home: {
+        sessionId: raw.sessionId || 'home',
+        name: 'Cal',
+        activeTask: {
+          description: raw.summary || 'Previous Cal session',
+          workstream: null,
+          status: 'handoff',
+          currentStep: 'Resume from the saved handoff summary.',
+          completedSteps: [],
+          nextSteps: [],
+          blockers: [],
+        },
+        summary: raw.summary || null,
+        lastActive: timestamp,
+        closed: false,
+      },
+    },
+    slimContext: raw.slimContext || {},
+  };
+}
+
+function getSessionBridgeKey(sessionId) {
+  const id = String(sessionId || '').trim();
+  return id.startsWith('strand-') ? id : 'home';
+}
+
+function formatRestorationContext(handoffData, sessionId, handoffTime) {
+  const sessions = handoffData.sessions || {};
+  const ownKey = getSessionBridgeKey(sessionId);
+  const ownEntry = sessions[ownKey] || null;
+  const otherEntries = Object.entries(sessions)
+    .filter(([key]) => key !== ownKey)
+    .map(([key, entry]) => ({ key, entry }))
+    .filter(({ entry }) => entry && typeof entry === 'object');
+
+  if (!ownEntry && otherEntries.length === 0) {
+    return null;
+  }
+
+  const sections = [
+    '# Session Bridge — Active Context',
+    '',
+    `**Last updated:** ${handoffTime.toLocaleString(getLocale(), { timeZone: getTimezone() })}`,
+  ];
+
+  if (ownEntry) {
+    sections.push('', '## Your Active Context', formatSessionEntry(ownEntry, { detailed: true }));
+  }
+
+  if (otherEntries.length > 0) {
+    sections.push('', '## Other Sessions');
+    for (const { key, entry } of otherEntries) {
+      sections.push(`- ${formatSessionEntrySummary(key, entry)}`);
+    }
+  }
+
+  const slim = handoffData.slimContext || {};
+  const decisions = Array.isArray(slim.keyDecisions) ? slim.keyDecisions.filter(Boolean) : [];
+  const artifacts = Array.isArray(slim.artifactsInProgress) ? slim.artifactsInProgress.filter(Boolean) : [];
+  const questions = Array.isArray(slim.openQuestions) ? slim.openQuestions.filter(Boolean) : [];
+
+  if (decisions.length || artifacts.length || questions.length) {
+    sections.push('', '## Shared Slim Context');
+    if (decisions.length) sections.push(`Key decisions: ${decisions.join('; ')}`);
+    if (artifacts.length) sections.push(`Artifacts in progress: ${artifacts.join('; ')}`);
+    if (questions.length) sections.push(`Open questions: ${questions.join('; ')}`);
+  }
+
+  return sections.join('\n');
+}
+
+function formatSessionEntry(entry, { detailed = false } = {}) {
+  const task = entry.activeTask || {};
+  const lines = [
+    `Session: ${entry.name || entry.sessionId || 'Cal'}${entry.closed ? ' (closed)' : ''}`,
+    `Description: ${task.description || entry.summary || 'No active task captured.'}`,
+    `Status: ${task.status || (entry.closed ? 'closed' : 'ready')}`,
+  ];
+
+  if (task.workstream) lines.push(`Workstream: ${task.workstream}`);
+  if (task.currentStep) lines.push(`Current step: ${task.currentStep}`);
+  if (detailed && Array.isArray(task.completedSteps) && task.completedSteps.length) {
+    lines.push(`Completed: ${task.completedSteps.join('; ')}`);
+  }
+  if (detailed && Array.isArray(task.nextSteps) && task.nextSteps.length) {
+    lines.push(`Next: ${task.nextSteps.join('; ')}`);
+  }
+  if (detailed && Array.isArray(task.blockers) && task.blockers.length) {
+    lines.push(`Blockers: ${task.blockers.join('; ')}`);
+  }
+  if (entry.summary) lines.push(`Summary: ${entry.summary}`);
+
+  return lines.join('\n');
+}
+
+function formatSessionEntrySummary(key, entry) {
+  const task = entry.activeTask || {};
+  const name = entry.name || (key === 'home' ? 'Cal' : key);
+  const description = task.description || entry.summary || 'No active task captured.';
+  const status = task.status || (entry.closed ? 'closed' : 'ready');
+  return `${name}${entry.closed ? ' (closed)' : ''}: ${description} [${status}]`;
 }
 
 /**

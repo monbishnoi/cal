@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
@@ -12,6 +12,16 @@ process.env.CAL_HTTP_PORT = '0';
 const { eventBus } = await import('./event-bus.js');
 const { conversationRuntime } = await import('./conversation-runtime.js');
 const { CalSession } = await import('./session.js');
+const {
+  loadSystemPrompt,
+  __setLastHandoffPathForTest: __setContextLastHandoffPathForTest,
+} = await import('./context.js');
+const {
+  loadHandoffData,
+  writeActiveContext,
+  writeActiveContextsForSessions,
+  __setLastHandoffPathForTest,
+} = await import('./session-bridge.js');
 const {
   setSession,
   setSessionManager,
@@ -70,6 +80,152 @@ function createToolSession(sessionId, messages = []) {
       this.steerQueue.push(text);
     },
   };
+}
+
+async function testSessionBridgeWritesStrandAwareActiveContext() {
+  const handoffPath = join(tempDir, 'handoff-write.json');
+  writeFileSync(handoffPath, JSON.stringify({
+    sessionId: 'legacy-main',
+    timestamp: '2026-06-23T12:00:00.000Z',
+    summary: 'Legacy summary',
+  }), 'utf8');
+  __setLastHandoffPathForTest(handoffPath);
+
+  try {
+    const session = createFakeSession('user-main');
+    session.messages.push(
+      { role: 'user', content: '**Tuesday, June 23, 2026** at **9:00 PM**\n\nImplement Session Bridge Resume' },
+      { role: 'assistant', content: [{ type: 'text', text: 'I am updating the bridge writer.' }] },
+    );
+
+    writeActiveContext(session, {
+      activeTask: {
+        status: 'working',
+        nextSteps: ['Run tests'],
+      },
+      slimContext: {
+        keyDecisions: ['Use a single strand-aware handoff file'],
+      },
+    });
+
+    const data = JSON.parse(readFileSync(handoffPath, 'utf8'));
+    assert.ok(data.sessions);
+    assert.equal(data.sessions.home.sessionId, 'user-main');
+    assert.equal(data.sessions.home.activeTask.description, 'Implement Session Bridge Resume');
+    assert.equal(data.sessions.home.activeTask.status, 'working');
+    assert.deepEqual(data.sessions.home.activeTask.nextSteps, ['Run tests']);
+    assert.equal(data.sessions.home.closed, false);
+    assert.equal(data.sessions.home.summary, 'Legacy summary');
+    assert.deepEqual(data.slimContext.keyDecisions, ['Use a single strand-aware handoff file']);
+
+    const loaded = loadHandoffData();
+    assert.equal(loaded.sessions.home.activeTask.description, 'Implement Session Bridge Resume');
+  } finally {
+    __setLastHandoffPathForTest(null);
+  }
+}
+
+async function testContextLoadsStrandSpecificActiveContext() {
+  const handoffPath = join(tempDir, 'handoff-context.json');
+  const timestamp = new Date().toISOString();
+  writeFileSync(handoffPath, JSON.stringify({
+    timestamp,
+    sessions: {
+      home: {
+        name: 'Cal',
+        sessionId: 'user-main',
+        activeTask: {
+          description: 'Home task X',
+          status: 'ready',
+          currentStep: 'Waiting for review',
+          completedSteps: [],
+          nextSteps: ['Review strand output'],
+          blockers: [],
+        },
+        lastActive: timestamp,
+        closed: false,
+      },
+      'strand-test-123': {
+        name: 'Strand',
+        sessionId: 'strand-test-123',
+        activeTask: {
+          description: 'Strand task Y',
+          status: 'working',
+          currentStep: 'Implementing',
+          completedSteps: [],
+          nextSteps: [],
+          blockers: [],
+        },
+        lastActive: timestamp,
+        closed: false,
+      },
+    },
+  }), 'utf8');
+  __setContextLastHandoffPathForTest(handoffPath);
+
+  try {
+    const strandPrompt = loadSystemPrompt('strand-test-123');
+    assert.match(strandPrompt, /# Session Bridge — Active Context/);
+    assert.match(strandPrompt, /## Your Active Context\nSession: Strand/);
+    assert.match(strandPrompt, /Description: Strand task Y/);
+    assert.match(strandPrompt, /## Other Sessions/);
+    assert.match(strandPrompt, /Cal: Home task X/);
+
+    const homePrompt = loadSystemPrompt('user-main');
+    assert.match(homePrompt, /Description: Home task X/);
+    assert.match(homePrompt, /Strand: Strand task Y/);
+  } finally {
+    __setContextLastHandoffPathForTest(null);
+  }
+}
+
+async function testStrandCloseWritesClosedHandoffEntry() {
+  const handoffPath = join(tempDir, 'handoff-strand-close.json');
+  __setLastHandoffPathForTest(handoffPath);
+
+  try {
+    const home = createFakeSession('multi-home-close');
+    const manager = new SessionManager({ homeSession: home });
+    const strand = manager.createSession();
+    const record = manager.getRecord(strand.sessionId);
+    record.runtime.messages.push({ role: 'user', content: 'Research topic Y in a strand' });
+
+    const result = await manager.summarizeAndDestroy(strand.sessionId);
+    assert.equal(result.closed, true);
+
+    const data = JSON.parse(readFileSync(handoffPath, 'utf8'));
+    assert.equal(data.sessions[strand.sessionId].closed, true);
+    assert.equal(data.sessions[strand.sessionId].activeTask, null);
+    assert.match(data.sessions[strand.sessionId].summary, /Research topic Y/);
+  } finally {
+    __setLastHandoffPathForTest(null);
+    setActiveSessionManager(null);
+  }
+}
+
+async function testSessionBridgeWritesAllActiveSessions() {
+  const handoffPath = join(tempDir, 'handoff-all-sessions.json');
+  __setLastHandoffPathForTest(handoffPath);
+
+  try {
+    const home = createFakeSession('user-main');
+    home.messages.push({ role: 'user', content: 'Home task X' });
+    const strand = createFakeSession('strand-test-all');
+    strand.messages.push({ role: 'user', content: 'Strand task Y' });
+
+    writeActiveContextsForSessions([
+      { sessionId: 'cal-home', name: 'Cal', runtime: home, permanent: true },
+      { sessionId: strand.sessionId, name: 'Strand', runtime: strand, permanent: false },
+    ], { reason: 'graceful_shutdown' });
+
+    const data = JSON.parse(readFileSync(handoffPath, 'utf8'));
+    assert.equal(data.sessions.home.activeTask.description, 'Home task X');
+    assert.equal(data.sessions['strand-test-all'].activeTask.description, 'Strand task Y');
+    assert.equal(data.sessions.home.closed, false);
+    assert.equal(data.sessions['strand-test-all'].closed, false);
+  } finally {
+    __setLastHandoffPathForTest(null);
+  }
 }
 
 function createSteerBoundarySession() {
@@ -470,6 +626,10 @@ async function testCrossSessionToolsRegistrationAndExecution() {
 }
 
 try {
+  await testSessionBridgeWritesStrandAwareActiveContext();
+  await testContextLoadsStrandSpecificActiveContext();
+  await testStrandCloseWritesClosedHandoffEntry();
+  await testSessionBridgeWritesAllActiveSessions();
   await testSteersDrainBeforeEveryModelCall();
   await testConversationRuntimeEvents();
   await testCommandDoesNotCallModel();

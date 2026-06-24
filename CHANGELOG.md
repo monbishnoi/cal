@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.3 - 2026-06-24
+
+- Added Session Bridge Resume: `last-handoff.json` now supports structured, strand-aware active context with `sessions.home` and Strand entries keyed by sessionId.
+- Restores each session's own active context while summarizing other active or closed sessions.
+- Writes active context during 90% Session Bridge handoff, graceful shutdown, and Strand close.
+- Preserves compatibility with the previous summary-only handoff file shape.
+
 ## Unreleased
 
 - Added optional generic Codex delegation behind `CODEX_ENABLED=true` and `MULTI_SESSION_ENABLED=true`, including `codex_send`, `codex_check`, configurable `CODEX_DEFAULT_THREAD_ID`, and a dedicated `Codex` Strand for background completion.

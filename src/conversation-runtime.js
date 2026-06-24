@@ -54,6 +54,17 @@ class ConversationRuntime {
     return this.defaultSession;
   }
 
+  listSessions() {
+    const sessions = [];
+    const seen = new Set();
+    for (const session of [this.defaultSession, ...this.sessions.values()]) {
+      if (!session?.sessionId || seen.has(session.sessionId)) continue;
+      seen.add(session.sessionId);
+      sessions.push(session);
+    }
+    return sessions;
+  }
+
   async handleUserMessage(input = {}) {
     const {
       text,
