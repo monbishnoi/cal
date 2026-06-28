@@ -335,6 +335,72 @@ async function testCommandDoesNotCallModel() {
   assert.match(result.text, /Session: command-test/);
 }
 
+async function testCalSessionBuildsImageContentBlocks() {
+  const session = new CalSession('image-content-test', { persist: false });
+  session.initialize = async () => {
+    session.isInitialized = true;
+    session.systemPrompt = 'test prompt';
+  };
+  session.callClaude = async () => ({
+    content: [{ type: 'text', text: 'I can see the image.' }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 20, output_tokens: 8 },
+  });
+
+  const result = await session.sendMessage('What is in this image?', {
+    attachments: [{
+      type: 'image',
+      mediaType: 'image/png',
+      filename: 'sample.png',
+      data: Buffer.from('fake-image').toString('base64'),
+    }],
+  });
+
+  assert.equal(result.text, 'I can see the image.');
+  assert.equal(session.messages[0].role, 'user');
+  assert(Array.isArray(session.messages[0].content));
+  assert.equal(session.messages[0].content[0].type, 'image');
+  assert.equal(session.messages[0].content[0].source.media_type, 'image/png');
+  assert.equal(session.messages[0].content[1].type, 'text');
+  assert.match(session.messages[0].content[1].text, /What is in this image\?/);
+  assert.match(session.messages[0].displayContent, /\[Attached image: sample\.png\]/);
+}
+
+async function testHttpMultipartImageUpload() {
+  let capturedAttachments = null;
+  const session = createFakeSession('http-upload-test');
+  session.sendMessage = async (text, options = {}) => {
+    capturedAttachments = options.attachments || [];
+    return {
+      text: `Saw ${capturedAttachments.length} image(s): ${text}`,
+      usageStatus: session.getUsageStatus(),
+    };
+  };
+  setSession(session);
+  const server = await startHttpServer();
+  const port = server.address().port;
+
+  try {
+    const form = new FormData();
+    form.append('message', 'describe this');
+    form.append('image', new Blob([Buffer.from('fake-image')], { type: 'image/png' }), 'phone.png');
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/chat/send`, {
+      method: 'POST',
+      body: form,
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.message, 'Saw 1 image(s): describe this');
+    assert.equal(capturedAttachments.length, 1);
+    assert.equal(capturedAttachments[0].mediaType, 'image/png');
+    assert.equal(capturedAttachments[0].filename, 'phone.png');
+    assert.equal(capturedAttachments[0].data, Buffer.from('fake-image').toString('base64'));
+  } finally {
+    stopHttpServer();
+  }
+}
+
 async function waitForWsMessage(ws) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Timed out waiting for WebSocket message')), 2000);
@@ -633,6 +699,8 @@ try {
   await testSteersDrainBeforeEveryModelCall();
   await testConversationRuntimeEvents();
   await testCommandDoesNotCallModel();
+  await testCalSessionBuildsImageContentBlocks();
+  await testHttpMultipartImageUpload();
   await testHttpWebSocketEndToEnd();
   await testMultiSessionEndpoints();
   await testMultiSessionWebSocketTags();

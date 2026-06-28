@@ -76,6 +76,7 @@ class ConversationRuntime {
       handleCommands = true,
       enableHandoff = true,
       sessionOptions = {},
+      attachments = [],
     } = input;
 
     const messageText = typeof text === 'string' ? text.trim() : '';
@@ -83,7 +84,7 @@ class ConversationRuntime {
     if (!activeSession) {
       throw new Error('No active session');
     }
-    if (!messageText) {
+    if (!messageText && attachments.length === 0) {
       throw new Error('Empty message');
     }
 
@@ -95,7 +96,7 @@ class ConversationRuntime {
       sessionId: runtimeSessionId,
       runId,
       source,
-      payload: { text: messageText, externalId, replyTarget },
+      payload: { text: messageText, externalId, replyTarget, attachmentCount: attachments.length },
     });
     publishEvent({ type: 'run_started', sessionId: runtimeSessionId, runId, source });
     publishEvent({
@@ -128,6 +129,7 @@ class ConversationRuntime {
 
       const result = await activeSession.sendMessage(messageText, {
         ...sessionOptions,
+        attachments,
         onToolCall: (toolName, toolInput) => {
           publishEvent({
             type: 'tool_call_started',
