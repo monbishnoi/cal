@@ -99,11 +99,20 @@ Just talk to Cal:
 | **Scheduled Jobs** | Run morning briefs, end-of-day summaries, handoffs, and memory consolidation |
 | **Auto Heal** | Disabled-by-default diagnosis and supervised repair for recurring gateway failures |
 | **Web Search** | Search the web when an API key is configured |
-| **File Operations** | Read, write, and edit files on your machine |
+| **File Operations** | Read, write, edit files, and save prior assistant responses from session history without regenerating long text |
 | **MCP Servers** | Connect approved Model Context Protocol servers, including optional external-service examples such as Google Workspace |
 | **Codex Delegation** | Optionally delegate coding tasks to Codex in a dedicated PWA Strand |
 
 All of this happens through conversation and explicit configuration.
+
+### Runtime Limits
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CAL_MAX_OUTPUT_TOKENS` | `12000` | Maximum model output tokens per Claude API turn. This includes structured tool-use output, not only visible text. |
+| `CAL_BASH_TIMEOUT_MS` | `300000` | Timeout for the interactive `bash` tool. Apple app tools keep shorter app-specific timeouts to avoid daemon hangs. |
+
+For "save that previous response" workflows, Cal can use `save_last_assistant_response` to copy the prior answer from local session history instead of regenerating the full text inside a tool call.
 
 ---
 

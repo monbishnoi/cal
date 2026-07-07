@@ -19,6 +19,7 @@ import { getActiveSessionManager, isMultiSessionEnabled } from './session-manage
 import { isCodexEnabled, sendCodexTask, checkCodex } from './codex-bridge.js';
 
 const execAsync = promisify(exec);
+const DEFAULT_BASH_TIMEOUT_MS = parsePositiveInt(process.env.CAL_BASH_TIMEOUT_MS, 5 * 60 * 1000);
 
 /**
  * Execute a command with guaranteed timeout.
@@ -142,6 +143,36 @@ export function getTools(options = {}) {
           },
         },
         required: ['path', 'content'],
+      },
+    },
+    {
+      name: 'save_last_assistant_response',
+      description: 'Save the previous assistant response from server-side session history to a markdown file without regenerating the response body. Use when the user asks to save, copy, export, archive, or turn the last answer into a Markdown note.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: 'Human-readable note title.',
+          },
+          path: {
+            type: 'string',
+            description: 'Optional exact destination file path. If omitted, directory + title is used.',
+          },
+          directory: {
+            type: 'string',
+            description: 'Optional destination directory. Defaults to docs/captures in the CAL workspace.',
+          },
+          filename: {
+            type: 'string',
+            description: 'Optional markdown filename. If omitted, a filename is generated from title.',
+          },
+          heading: {
+            type: 'boolean',
+            description: 'Whether to prepend a markdown H1 title. Defaults to true.',
+          },
+        },
+        required: ['title'],
       },
     },
     {
@@ -580,7 +611,7 @@ function resolveExternalToolRoute(toolName) {
 /**
  * Execute a tool call
  */
-export async function executeToolCall(toolName, input) {
+export async function executeToolCall(toolName, input, context = {}) {
   switch (toolName) {
     case 'bash':
       return await executeBash(input.command);
@@ -590,6 +621,9 @@ export async function executeToolCall(toolName, input) {
 
     case 'write_file':
       return writeFile(input.path, input.content);
+
+    case 'save_last_assistant_response':
+      return saveLastAssistantResponse(input || {}, context.session);
 
     case 'edit_file':
       return editFile(input.path, input.old_text, input.new_text);
@@ -690,7 +724,7 @@ async function executeBash(command) {
   try {
     const { stdout, stderr } = await execAsync(command, {
       cwd: CAL_HOME,
-      timeout: 60000, // 60 second timeout
+      timeout: DEFAULT_BASH_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer
     });
 
@@ -739,6 +773,125 @@ function writeFile(path, content) {
 
   writeFileSync(fullPath, content, 'utf8');
   return `File written: ${fullPath} (${content.length} bytes)`;
+}
+
+function saveLastAssistantResponse(input, session) {
+  if (!session?.messages) {
+    throw new Error('save_last_assistant_response requires active session history');
+  }
+
+  const title = String(input.title || '').trim();
+  if (!title) {
+    throw new Error('save_last_assistant_response requires a title');
+  }
+
+  const response = findLastAssistantText(session.messages);
+  if (!response) {
+    throw new Error('No previous assistant response found to save');
+  }
+
+  const fullPath = resolveSaveResponsePath(input, title);
+  const finalPath = getAvailablePath(fullPath);
+  const includeHeading = input.heading !== false;
+  const body = includeHeading
+    ? `# ${title}\n\n${response}\n`
+    : `${response}\n`;
+
+  const dir = dirname(finalPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  writeFileSync(finalPath, body, 'utf8');
+  return `Saved previous assistant response to ${finalPath} (${response.length} chars)`;
+}
+
+function findLastAssistantText(messages = []) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== 'assistant') continue;
+
+    const text = extractMessageText(message.content).trim();
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function extractMessageText(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .filter(part => part?.type === 'text' && typeof part.text === 'string')
+      .map(part => part.text)
+      .join('\n')
+      .trim();
+  }
+
+  return '';
+}
+
+function resolveSaveResponsePath(input, title) {
+  if (typeof input.path === 'string' && input.path.trim()) {
+    return resolveWorkspacePath(ensureMarkdownExtension(input.path.trim()));
+  }
+
+  const directory = typeof input.directory === 'string' && input.directory.trim()
+    ? resolveWorkspacePath(input.directory.trim())
+    : join(CAL_HOME, 'docs', 'captures');
+  const filename = typeof input.filename === 'string' && input.filename.trim()
+    ? ensureMarkdownExtension(sanitizeFilename(input.filename.trim()))
+    : `${sanitizeFilename(title)}.md`;
+
+  return join(directory, filename);
+}
+
+function resolveWorkspacePath(path) {
+  return path.startsWith('/') ? path : join(CAL_HOME, path);
+}
+
+function sanitizeFilename(value) {
+  const sanitized = String(value || 'note')
+    .normalize('NFKD')
+    .replace(/[^\w\s.-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 120)
+    .replace(/^\.+|\.+$/g, '');
+
+  return sanitized || 'note';
+}
+
+function ensureMarkdownExtension(path) {
+  return /\.md$/i.test(path) ? path : `${path}.md`;
+}
+
+function getAvailablePath(path) {
+  if (!existsSync(path)) {
+    return path;
+  }
+
+  const dotIndex = path.toLowerCase().lastIndexOf('.md');
+  const base = dotIndex >= 0 ? path.slice(0, dotIndex) : path;
+  const ext = dotIndex >= 0 ? path.slice(dotIndex) : '';
+
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${base}-${i}${ext}`;
+    if (!existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Could not find available filename for ${path}`);
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 /**

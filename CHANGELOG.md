@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added `save_last_assistant_response` so save/export requests can copy prior assistant text from session history without regenerating large responses into tool-call JSON.
+- Changed model output cap from hardcoded `4096` to configurable `CAL_MAX_OUTPUT_TOKENS`, default `12000`.
+- Changed interactive `bash` timeout from 60 seconds to configurable `CAL_BASH_TIMEOUT_MS`, default 5 minutes.
+- Added a guard that replaces max-token/no-text final assistant responses with readable fallback text instead of blank PWA replies or orphaned tool calls.
 - Added optional generic Codex delegation behind `CODEX_ENABLED=true` and `MULTI_SESSION_ENABLED=true`, including `codex_send`, `codex_check`, configurable `CODEX_DEFAULT_THREAD_ID`, and a dedicated `Codex` Strand for background completion.
 - Fixed PWA Strands tab rendering so inactive Strand runtime events render into their own session containers and tab switching opens at the latest messages.
 - Added PWA Strands behind `MULTI_SESSION_ENABLED=true`: Cal home plus up to 3 parallel in-memory PWA sessions with independent histories, status tabs, close-summary writeback, stale-session recovery, and local cross-session tools (`inject_context`, `search_session`).

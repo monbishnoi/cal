@@ -20,6 +20,7 @@ import { getLoopPilotGuidance } from './loop-pilot.js';
 const API_KEY = process.env.HYPERSPACE_PROXY_KEY || process.env.ANTHROPIC_API_KEY;
 const BASE_URL = process.env.HYPERSPACE_PROXY_URL || 'http://localhost:6655/anthropic';
 const MODEL = process.env.CAL_MODEL || 'anthropic--claude-4.6-opus';
+const MAX_OUTPUT_TOKENS = parsePositiveInt(process.env.CAL_MAX_OUTPUT_TOKENS, 12000);
 
 // Session Bridge: Context window limit (200K tokens for standard Opus)
 const CONTEXT_LIMIT = parseInt(process.env.CAL_CONTEXT_LIMIT) || 200000;
@@ -327,7 +328,7 @@ export class CalSession {
           }
 
           try {
-            const result = await executeToolCall(toolUse.name, toolUse.input);
+            const result = await executeToolCall(toolUse.name, toolUse.input, { session: this });
 
             if (onToolResult) {
               onToolResult(toolUse.name, false);
@@ -487,7 +488,7 @@ export class CalSession {
           const toolResults = [];
           for (const toolUse of toolUses) {
             try {
-              const result = await executeToolCall(toolUse.name, toolUse.input);
+              const result = await executeToolCall(toolUse.name, toolUse.input, { session: this });
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
@@ -553,13 +554,11 @@ export class CalSession {
         }
       }
 
-      // Final response (no more tools)
-      // Ensure we have content to push
-      let finalContent = response.content;
-      if (!finalContent || finalContent.length === 0) {
-        // Empty response - add a placeholder to avoid corruption
-        console.warn(`[Session ${this.sessionId}] Empty response content, adding placeholder`);
-        finalContent = [{ type: 'text', text: '(completed)' }];
+      // Final response (no more tools). If the model stopped before producing
+      // usable text, never persist non-text blocks that would orphan tool calls.
+      let finalContent = normalizeFinalAssistantContent(response, isBackgroundJob);
+      if (finalContent !== response.content) {
+        console.warn(`[Session ${this.sessionId}] Replaced incomplete final response (stop_reason=${response.stop_reason || 'unknown'})`);
       }
 
       this.messages.push({
@@ -748,7 +747,7 @@ export class CalSession {
 
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: 4096,
+      max_tokens: MAX_OUTPUT_TOKENS,
       system: this.systemPrompt,
       messages: this.messages,
       tools: getTools(),
@@ -876,4 +875,48 @@ export class CalSession {
     }
     return history;
   }
+}
+
+function normalizeFinalAssistantContent(response, isBackgroundJob = false) {
+  const content = Array.isArray(response?.content) ? response.content : [];
+  const textParts = content.filter(part =>
+    part?.type === 'text' &&
+    typeof part.text === 'string' &&
+    part.text.trim()
+  );
+  const hasNonTextBlocks = content.some(part => part?.type !== 'text');
+  const stopReason = response?.stop_reason || 'unknown';
+
+  if (content.length === 0) {
+    return [{ type: 'text', text: buildIncompleteResponseText(stopReason, isBackgroundJob) }];
+  }
+
+  if (hasNonTextBlocks && stopReason !== 'tool_use') {
+    return textParts.length > 0
+      ? textParts
+      : [{ type: 'text', text: buildIncompleteResponseText(stopReason, isBackgroundJob) }];
+  }
+
+  if (textParts.length === 0 && stopReason !== 'tool_use') {
+    return [{ type: 'text', text: buildIncompleteResponseText(stopReason, isBackgroundJob) }];
+  }
+
+  return content;
+}
+
+function buildIncompleteResponseText(stopReason, isBackgroundJob = false) {
+  if (isBackgroundJob) {
+    return `The job stopped before producing a readable summary (stop reason: ${stopReason}). Check logs for details.`;
+  }
+
+  if (stopReason === 'max_tokens') {
+    return 'I hit the response limit while preparing the next step, so I did not finish that turn. Please send it again, or say "continue" and I will pick it back up.';
+  }
+
+  return 'I finished processing, but the model returned no readable text. Please send that again, or say "continue" and I will pick it back up.';
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
