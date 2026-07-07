@@ -64,6 +64,12 @@ Same assistant, same local memory, different doors.
 
 Turn on `MULTI_SESSION_ENABLED=true` to use Strands in the PWA. Cal home stays persistent, and you can open up to 3 temporary parallel Strands for focused tasks. Each Strand has its own conversation history and status, while sharing the same Cal identity, tools, and memory surfaces.
 
+### Resumes active context.
+
+Session Bridge Resume keeps momentum across restarts and handoffs. Cal writes structured active context to `data/last-handoff.json`, keyed by `sessions.home` for the persistent session and by `strand-*` sessionId for PWA Strands.
+
+When a new session starts, it restores its own active task and sees a compact view of what other sessions were doing. V1 write triggers are the 90% Session Bridge handoff, graceful shutdown, and Strand close.
+
 ### Yours to configure.
 
 Cal ships with example configuration only. You choose the model, channels, MCP servers, jobs, and local integrations.

@@ -25,8 +25,9 @@ import { CAL_HOME } from './paths.js';
 import { getToday } from './context.js';
 import { getMainSessionId, getBackgroundSessionId, getTimezone } from './user-config.js';
 import { filterRuntimeMCPServers } from './runtime-config.js';
-import { SessionManager, isMultiSessionEnabled } from './session-manager.js';
+import { SessionManager, isMultiSessionEnabled, getActiveSessionManager } from './session-manager.js';
 import { initializeCodexBridge, validateCodexStartupConfig, isCodexEnabled } from './codex-bridge.js';
+import { writeActiveContextsForSessions } from './session-bridge.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -561,6 +562,15 @@ async function shutdown() {
   // Disconnect MCP clients
   const mcpManager = getMCPClientManager();
   await mcpManager.disconnectAll();
+
+  // Preserve active session context for the next startup.
+  try {
+    const manager = getActiveSessionManager();
+    const activeSessions = manager?.listObservationSessions?.() || conversationRuntime.listSessions();
+    writeActiveContextsForSessions(activeSessions, { reason: 'graceful_shutdown' });
+  } catch (err) {
+    console.warn(`[Gateway] Failed to write Session Bridge active context: ${err.message}`);
+  }
 
   // Flush sessions to disk
   flushToDisk();

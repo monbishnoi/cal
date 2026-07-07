@@ -119,7 +119,7 @@ export class CalSession {
     console.log(`[Session ${this.sessionId}] Initializing session...`);
 
     // Load CAL.md, MEMORY.md, USER.md as system prompt
-    this.systemPrompt = loadSystemPrompt();
+    this.systemPrompt = loadSystemPrompt(this.sessionId);
 
     this.isInitialized = true;
     console.log(`[Session ${this.sessionId}] Session initialized with ${this.messages.length} messages`);
@@ -252,21 +252,29 @@ export class CalSession {
   }
 
   async _sendMessage(userMessage, options = {}) {
-    const { onToolCall, onToolResult, onResponse, maxIterations: customMaxIterations, isBackgroundJob, isHandoff } = options;
+    const {
+      onToolCall,
+      onToolResult,
+      onResponse,
+      maxIterations: customMaxIterations,
+      isBackgroundJob,
+      isHandoff,
+      attachments = [],
+    } = options;
 
     if (!this.isInitialized) {
       await this.initialize();
     }
 
     // Capture original user message for continuation prompt (used if mid-tool-loop handoff occurs)
-    const originalUserMessage = userMessage;
+    const originalUserMessage = userMessage || 'Image attachment';
 
     // Reset mid-loop counter for new user requests, but not nested handoff prompts.
     if (!options.internal) {
       this.midLoopResetCount = 0;
     }
 
-    console.log(`[Session ${this.sessionId}] Sending: ${userMessage.substring(0, 50)}...`);
+    console.log(`[Session ${this.sessionId}] Sending: ${originalUserMessage.substring(0, 50)}...`);
 
     // Validate and repair message history
     const wasClean = this.validateMessages();
@@ -277,20 +285,26 @@ export class CalSession {
 
     // Add timestamp context and optional Loop Pilot guidance.
     const timeContext = getCurrentTimeContext();
+    const visibleUserMessage = userMessage?.trim() || 'Please inspect the attached image.';
     const loopPilotGuidance = await getLoopPilotGuidance(userMessage, {
       ...options,
       sessionId: this.sessionId,
       maxIterations: customMaxIterations || 10,
     });
     const messageContent = loopPilotGuidance
-      ? `${timeContext}\n\n${loopPilotGuidance}\n\n${userMessage}`
-      : `${timeContext}\n\n${userMessage}`;
+      ? `${timeContext}\n\n${loopPilotGuidance}\n\n${visibleUserMessage}`
+      : `${timeContext}\n\n${visibleUserMessage}`;
+    const attachmentDisplayText = buildAttachmentDisplayText(userMessage?.trim(), attachments);
 
     // Add user message to history
-    this.messages.push({
+    const userHistoryMessage = {
       role: 'user',
-      content: messageContent,
-    });
+      content: buildUserMessageContent(messageContent, attachments),
+    };
+    if (attachmentDisplayText) {
+      userHistoryMessage.displayContent = `${timeContext}\n\n${attachmentDisplayText}`;
+    }
+    this.messages.push(userHistoryMessage);
 
     // Snapshot for rollback on failure
     const messageCountBeforeCall = this.messages.length;
@@ -875,6 +889,35 @@ export class CalSession {
     }
     return history;
   }
+}
+
+function buildUserMessageContent(text, attachments = []) {
+  if (!attachments.length) {
+    return text;
+  }
+
+  return [
+    ...attachments.map(attachment => ({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: attachment.mediaType,
+        data: attachment.data,
+      },
+    })),
+    { type: 'text', text },
+  ];
+}
+
+function buildAttachmentDisplayText(userMessage, attachments = []) {
+  if (!attachments.length) return null;
+
+  const names = attachments
+    .map(attachment => attachment.filename || attachment.mediaType || 'image')
+    .filter(Boolean)
+    .join(', ');
+  const suffix = names ? `\n\n[Attached image: ${names}]` : '\n\n[Attached image]';
+  return `${userMessage || 'Image attached.'}${suffix}`;
 }
 
 function normalizeFinalAssistantContent(response, isBackgroundJob = false) {

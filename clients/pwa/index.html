@@ -561,11 +561,115 @@
 
     .composer-shell {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 44px;
+      grid-template-columns: 44px minmax(0, 1fr) 44px;
       align-items: end;
       gap: 8px;
       max-width: 900px;
       margin: 0 auto;
+    }
+
+    .attach {
+      width: 44px;
+      height: 44px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .attach:active {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    .attach:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    .attach svg {
+      width: 21px;
+      height: 21px;
+    }
+
+    .file-input {
+      display: none;
+    }
+
+    .attachment-preview {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr) 34px;
+      align-items: center;
+      gap: 10px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(244, 240, 234, 0.05);
+    }
+
+    .attachment-preview[hidden] {
+      display: none;
+    }
+
+    .attachment-preview img,
+    .message-image {
+      width: 54px;
+      height: 54px;
+      border-radius: 7px;
+      object-fit: cover;
+      background: var(--surface-2);
+    }
+
+    .attachment-name {
+      min-width: 0;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.25;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .attachment-size {
+      margin-top: 2px;
+      color: var(--subtle);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .remove-attachment {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .remove-attachment:active {
+      background: rgba(244, 240, 234, 0.08);
+      color: var(--text);
+    }
+
+    .message-attachment {
+      display: grid;
+      gap: 8px;
+    }
+
+    .message-attachment .message-image {
+      width: min(220px, 100%);
+      height: auto;
+      max-height: 260px;
+      aspect-ratio: auto;
+    }
+
+    .message-text {
+      white-space: pre-wrap;
     }
 
     .input-meta {
@@ -755,6 +859,12 @@
 
     <form class="composer" id="composer">
       <div class="composer-shell">
+        <input class="file-input" id="fileInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/*">
+        <button class="attach" id="attachBtn" type="button" aria-label="Attach image" title="Attach image">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 1 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"></path>
+          </svg>
+        </button>
         <textarea id="input" rows="1" maxlength="50000" autocomplete="off" autocapitalize="sentences" placeholder="Message Cal..."></textarea>
         <button class="send" id="send" type="submit" aria-label="Send message" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -762,6 +872,14 @@
             <path d="m22 2-7 20-4-9-9-4 20-7Z"></path>
           </svg>
         </button>
+        <div class="attachment-preview" id="attachmentPreview" hidden>
+          <img id="attachmentThumb" alt="">
+          <div>
+            <div class="attachment-name" id="attachmentName"></div>
+            <div class="attachment-size" id="attachmentSize"></div>
+          </div>
+          <button class="remove-attachment" id="removeAttachment" type="button" aria-label="Remove image">×</button>
+        </div>
         <div class="input-meta" id="inputMeta"></div>
       </div>
     </form>
@@ -776,6 +894,13 @@
     const input = document.getElementById('input');
     const inputMeta = document.getElementById('inputMeta');
     const sendBtn = document.getElementById('send');
+    const attachBtn = document.getElementById('attachBtn');
+    const fileInput = document.getElementById('fileInput');
+    const attachmentPreview = document.getElementById('attachmentPreview');
+    const attachmentThumb = document.getElementById('attachmentThumb');
+    const attachmentName = document.getElementById('attachmentName');
+    const attachmentSize = document.getElementById('attachmentSize');
+    const removeAttachment = document.getElementById('removeAttachment');
     const composer = document.getElementById('composer');
     const refreshBtn = document.getElementById('refreshBtn');
     const statusDot = document.getElementById('statusDot');
@@ -793,7 +918,11 @@
     const sessionViews = new Map();
     const DEFAULT_SESSION_ID = '__default__';
     const MAX_INPUT_CHARS = 50000;
+    const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+    const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
     const TOKEN_ESTIMATE_CHARS = 4;
+    let selectedImage = null;
+    let selectedImageUrl = null;
     input.maxLength = MAX_INPUT_CHARS;
 
     function getActiveSession() {
@@ -1281,7 +1410,9 @@
     // --- Send Message ---
     async function sendMessage() {
       const text = input.value.trim();
-      if (!text) return;
+      const image = selectedImage;
+      const imageUrl = selectedImageUrl;
+      if (!text && !image) return;
       const targetSessionId = activeSessionId;
 
       if (multiSessionEnabled && (!activeSessionId || !sessions.has(activeSessionId))) {
@@ -1289,6 +1420,10 @@
         return;
       }
       if (isActiveProcessing()) {
+        if (image) {
+          showToast('Wait for Cal to finish before sending an image.');
+          return;
+        }
         // Steering: send as steer event while Cal is working
         wsSend({ type: 'steer', sessionId: targetSessionId, text });
         addMessage(text, 'user', { sessionId: targetSessionId });
@@ -1298,9 +1433,19 @@
         return;
       }
 
-      addMessage(text, 'user', { sessionId: targetSessionId });
+      addMessage(text || 'Image attached', 'user', {
+        sessionId: targetSessionId,
+        imageUrl,
+        imageName: image?.name,
+      });
       input.value = '';
+      if (image) clearAttachment({ revoke: false });
       autoSizeInput();
+
+      if (image) {
+        await sendMessageHttp(text, image);
+        return;
+      }
 
       const sent = wsSend({ type: 'message', sessionId: targetSessionId, text });
       if (!sent) {
@@ -1310,28 +1455,44 @@
       }
     }
 
-    async function sendMessageHttp(text) {
+    async function sendMessageHttp(text, image = null) {
       const targetSessionId = activeSessionId;
       isProcessing = true;
       input.disabled = true;
+      attachBtn.disabled = true;
       setStatus('busy', 'Thinking');
       const loading = addMessage('Cal is thinking...', 'assistant', { pending: true, sessionId: targetSessionId });
 
       try {
         let response;
+        const buildRequest = () => {
+          if (!image) {
+            return {
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ message: text }),
+            };
+          }
+
+          const form = new FormData();
+          form.append('message', text || '');
+          form.append('image', image, image.name || 'image');
+          return {
+            headers: { Accept: 'application/json' },
+            body: form,
+          };
+        };
+
         if (multiSessionEnabled && targetSessionId) {
           response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(targetSessionId)}/message`), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ message: text }),
+            ...buildRequest(),
           });
         } else {
           response = await fetch(apiUrl('/api/chat/send'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ message: text }),
+            ...buildRequest(),
           });
-          if (response.status === 404) {
+          if (!image && response.status === 404) {
             response = await fetch(apiUrl('/'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -1354,6 +1515,7 @@
       } finally {
         isProcessing = false;
         input.disabled = false;
+        attachBtn.disabled = false;
         autoSizeInput();
         input.focus({ preventScroll: true });
       }
@@ -1654,6 +1816,21 @@
 
       if (role === 'assistant') {
         bubble.innerHTML = options.pending ? (text ? escapeHtml(text) : '') : renderMarkdown(text);
+      } else if (options.imageUrl) {
+        const wrap = document.createElement('div');
+        wrap.className = 'message-attachment';
+        const image = document.createElement('img');
+        image.className = 'message-image';
+        image.src = options.imageUrl;
+        image.alt = options.imageName || 'Attached image';
+        wrap.appendChild(image);
+        if (text) {
+          const label = document.createElement('div');
+          label.className = 'message-text';
+          label.textContent = text;
+          wrap.appendChild(label);
+        }
+        bubble.appendChild(wrap);
       } else {
         bubble.textContent = text;
       }
@@ -1676,7 +1853,7 @@
     function autoSizeInput() {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 132) + 'px';
-      sendBtn.disabled = input.value.trim().length === 0;
+      sendBtn.disabled = input.value.trim().length === 0 && !selectedImage;
       updateInputMeta();
     }
 
@@ -1687,10 +1864,56 @@
       return String(value);
     }
 
+    function formatBytes(bytes) {
+      if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '') + ' MB';
+      if (bytes >= 1024) return Math.round(bytes / 1024) + ' KB';
+      return bytes + ' B';
+    }
+
+    function clearAttachment(options = {}) {
+      const revoke = options.revoke !== false;
+      if (revoke && selectedImageUrl) {
+        URL.revokeObjectURL(selectedImageUrl);
+      }
+      selectedImage = null;
+      selectedImageUrl = null;
+      fileInput.value = '';
+      attachmentThumb.removeAttribute('src');
+      attachmentName.textContent = '';
+      attachmentSize.textContent = '';
+      attachmentPreview.hidden = true;
+      autoSizeInput();
+    }
+
+    function setSelectedImage(file) {
+      if (!file) return;
+      if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+        showToast('Use JPEG, PNG, GIF, or WebP.');
+        fileInput.value = '';
+        return;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        showToast('Image must be 5 MB or less.');
+        fileInput.value = '';
+        return;
+      }
+
+      clearAttachment();
+      selectedImage = file;
+      selectedImageUrl = URL.createObjectURL(file);
+      attachmentThumb.src = selectedImageUrl;
+      attachmentThumb.alt = file.name || 'Selected image';
+      attachmentName.textContent = file.name || 'Selected image';
+      attachmentSize.textContent = `${file.type.replace('image/', '').toUpperCase()} · ${formatBytes(file.size)}`;
+      attachmentPreview.hidden = false;
+      autoSizeInput();
+    }
+
     function updateInputMeta() {
       const charCount = input.value.length;
       const estimatedTokens = Math.ceil(charCount / TOKEN_ESTIMATE_CHARS);
-      inputMeta.textContent = `${charCount.toLocaleString()} / ${MAX_INPUT_CHARS.toLocaleString()} chars / ~${formatCompactNumber(estimatedTokens)} tokens`;
+      const attachmentText = selectedImage ? ` / ${formatBytes(selectedImage.size)} image` : '';
+      inputMeta.textContent = `${charCount.toLocaleString()} / ${MAX_INPUT_CHARS.toLocaleString()} chars / ~${formatCompactNumber(estimatedTokens)} tokens${attachmentText}`;
       inputMeta.classList.toggle('warning', charCount >= MAX_INPUT_CHARS * 0.9);
     }
 
@@ -1706,6 +1929,20 @@
         event.preventDefault();
         sendMessage();
       }
+    });
+
+    attachBtn.addEventListener('click', () => {
+      if (attachBtn.disabled) return;
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', () => {
+      setSelectedImage(fileInput.files?.[0]);
+    });
+
+    removeAttachment.addEventListener('click', () => {
+      clearAttachment();
+      input.focus({ preventScroll: true });
     });
 
     refreshBtn.addEventListener('click', () => {

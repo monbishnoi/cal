@@ -23,6 +23,14 @@ import { getActiveSessionManager, isMultiSessionEnabled } from './session-manage
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PWA_DIR = join(__dirname, '..', 'clients', 'pwa');
 const HISTORY_LIMIT = 80;
+const MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024;
+const MAX_MULTIPART_BODY_BYTES = MAX_IMAGE_UPLOAD_BYTES + 256 * 1024;
+const SUPPORTED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
 
 // Default port
 const HTTP_PORT = process.env.CAL_HTTP_PORT || 8080;
@@ -368,6 +376,164 @@ async function readJsonBody(req) {
   return JSON.parse(body);
 }
 
+async function readRequestBuffer(req, maxBytes) {
+  const chunks = [];
+  let total = 0;
+
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      const err = new Error('Upload is too large. Images must be 5MB or less.');
+      err.statusCode = 413;
+      throw err;
+    }
+    chunks.push(chunk);
+  }
+
+  return Buffer.concat(chunks, total);
+}
+
+function parseContentType(header = '') {
+  const [type, ...parts] = String(header).split(';').map(part => part.trim());
+  const params = {};
+  for (const part of parts) {
+    const [key, ...valueParts] = part.split('=');
+    if (!key || valueParts.length === 0) continue;
+    params[key.toLowerCase()] = valueParts.join('=').replace(/^"|"$/g, '');
+  }
+  return { type: type.toLowerCase(), params };
+}
+
+function parseContentDisposition(header = '') {
+  const [, ...parts] = String(header).split(';').map(part => part.trim());
+  const params = {};
+  for (const part of parts) {
+    const [key, ...valueParts] = part.split('=');
+    if (!key || valueParts.length === 0) continue;
+    params[key.toLowerCase()] = valueParts.join('=').replace(/^"|"$/g, '');
+  }
+  return params;
+}
+
+function splitBuffer(buffer, delimiter) {
+  const parts = [];
+  let start = 0;
+  let index = buffer.indexOf(delimiter, start);
+
+  while (index !== -1) {
+    parts.push(buffer.subarray(start, index));
+    start = index + delimiter.length;
+    index = buffer.indexOf(delimiter, start);
+  }
+
+  parts.push(buffer.subarray(start));
+  return parts;
+}
+
+function trimBoundaryPart(part) {
+  let start = 0;
+  let end = part.length;
+
+  if (part.subarray(0, 2).toString() === '\r\n') start = 2;
+  if (part.subarray(end - 2).toString() === '\r\n') end -= 2;
+  if (part.subarray(end - 2, end).toString() === '--') end -= 2;
+  if (part.subarray(end - 2).toString() === '\r\n') end -= 2;
+
+  return part.subarray(start, end);
+}
+
+function parseMultipartFormData(buffer, boundary) {
+  const delimiter = Buffer.from(`--${boundary}`);
+  const fields = {};
+  const files = [];
+
+  for (const rawPart of splitBuffer(buffer, delimiter)) {
+    const part = trimBoundaryPart(rawPart);
+    if (!part.length) continue;
+
+    const separator = Buffer.from('\r\n\r\n');
+    const separatorIndex = part.indexOf(separator);
+    if (separatorIndex === -1) continue;
+
+    const headerText = part.subarray(0, separatorIndex).toString('utf8');
+    const body = part.subarray(separatorIndex + separator.length);
+    const headers = {};
+    for (const line of headerText.split('\r\n')) {
+      const splitAt = line.indexOf(':');
+      if (splitAt === -1) continue;
+      headers[line.slice(0, splitAt).trim().toLowerCase()] = line.slice(splitAt + 1).trim();
+    }
+
+    const disposition = parseContentDisposition(headers['content-disposition']);
+    if (!disposition.name) continue;
+
+    if (disposition.filename) {
+      files.push({
+        fieldName: disposition.name,
+        filename: disposition.filename,
+        contentType: (headers['content-type'] || 'application/octet-stream').toLowerCase(),
+        buffer: body,
+      });
+    } else {
+      fields[disposition.name] = body.toString('utf8');
+    }
+  }
+
+  return { fields, files };
+}
+
+function imageAttachmentFromFile(file) {
+  if (!file || file.buffer.length === 0) return null;
+  if (!SUPPORTED_IMAGE_TYPES.has(file.contentType)) {
+    const err = new Error('Unsupported image type. Use JPEG, PNG, GIF, or WebP.');
+    err.statusCode = 415;
+    throw err;
+  }
+  if (file.buffer.length > MAX_IMAGE_UPLOAD_BYTES) {
+    const err = new Error('Image is too large. Maximum size is 5MB.');
+    err.statusCode = 413;
+    throw err;
+  }
+
+  return {
+    type: 'image',
+    mediaType: file.contentType,
+    filename: file.filename,
+    size: file.buffer.length,
+    data: file.buffer.toString('base64'),
+  };
+}
+
+async function readChatPayload(req) {
+  const contentType = parseContentType(req.headers['content-type'] || '');
+
+  if (contentType.type === 'multipart/form-data') {
+    const boundary = contentType.params.boundary;
+    if (!boundary) {
+      const err = new Error('Missing multipart boundary');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const buffer = await readRequestBuffer(req, MAX_MULTIPART_BODY_BYTES);
+    const form = parseMultipartFormData(buffer, boundary);
+    const imageFile = form.files.find(file => file.fieldName === 'image' || file.fieldName === 'file');
+    const image = imageAttachmentFromFile(imageFile);
+    const text = form.fields.message || form.fields.text || '';
+
+    return {
+      text: String(text || '').trim(),
+      attachments: image ? [image] : [],
+    };
+  }
+
+  const body = await readJsonBody(req);
+  return {
+    text: String(body.text || body.message || '').trim(),
+    attachments: [],
+  };
+}
+
 function writeJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json',
@@ -427,9 +593,11 @@ async function handleSessionsApi(req, res, pathname) {
     const messageMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/message$/);
     if (messageMatch && req.method === 'POST') {
       const sessionId = decodeURIComponent(messageMatch[1]);
-      const body = await readJsonBody(req);
-      const text = body.text || body.message || '';
-      const result = await manager.routeMessage(sessionId, text, { source: 'pwa' });
+      const body = await readChatPayload(req);
+      const result = await manager.routeMessage(sessionId, body.text || '', {
+        source: 'pwa',
+        attachments: body.attachments || [],
+      });
       writeJson(res, 200, { sessionId, message: result.text, usageStatus: result.usageStatus || null });
       return;
     }
@@ -451,6 +619,31 @@ async function handleSessionsApi(req, res, pathname) {
       payload.sessions = manager.listActive();
     }
     writeJson(res, statusCode, payload);
+  }
+}
+
+async function handleDirectChatRequest(req, res) {
+  const currentSession = getSession();
+  if (!currentSession) {
+    writeJson(res, 503, { error: 'No active session' });
+    return;
+  }
+
+  try {
+    const body = await readChatPayload(req);
+    const result = await conversationRuntime.handleUserMessage({
+      source: 'pwa',
+      text: body.text || '',
+      session: currentSession,
+      attachments: body.attachments || [],
+    });
+
+    writeJson(res, 200, {
+      message: result.text,
+      usageStatus: result.usageStatus || null,
+    });
+  } catch (err) {
+    writeJson(res, err.statusCode || (err instanceof SyntaxError ? 400 : 500), { error: err.message });
   }
 }
 
@@ -715,6 +908,10 @@ async function handleHttpRequest(req, res) {
 
   // API: clearer chat endpoint alias for the web UI.
   if (pathname === '/api/chat/send' && req.method === 'POST') {
+    if (parseContentType(req.headers['content-type'] || '').type === 'multipart/form-data') {
+      await handleDirectChatRequest(req, res);
+      return;
+    }
     handleA2ARequest(req, res);
     return;
   }
