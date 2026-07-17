@@ -67,7 +67,6 @@ echo -e "${BOLD}Features:${NC}"
 for feature in $(jq -r '.features // {} | keys[]' "$CONFIG_FILE" 2>/dev/null); do
   case "$feature" in
     qmd) check_mapping "features.$feature" "setup/qmd-setup.sh" ;;
-    autoHeal) check_mapping "features.$feature" "" ;;
     *) check_mapping "features.$feature" "" ;;
   esac
 done

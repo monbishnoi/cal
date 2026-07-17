@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.0 - 2026-07-17
+
+- Added optional Talkbox voice mode to the PWA through environment-configured `/voice/*` proxy routes.
+- Added active Home/Strand voice-session binding, four-layer context hydration, progress narration events, and idempotent transcript writeback.
+- Added a shared response coordinator that prevents duplicate Realtime responses and recovers cleanly from data-channel failures.
+- Added voice lifecycle benchmarks, WebRTC diagnostics, microphone visualization, and reconnect/retry behavior.
+- Added conversation-context generation with an earlier-summary layer plus a verbatim recent-message tail.
+- Added semantic nightly startup-memory refresh with deterministic strength decay and a bounded `STARTUP-MEMORY.md` projection.
+- Upgraded `@openai/codex-sdk` to `0.144.4`.
+- Preserved text-only, image-upload, WebSocket, scheduled-job, and Session Bridge behavior.
+
 ## v1.0.3 - 2026-06-24
 
 - Added Session Bridge Resume: `last-handoff.json` now supports structured, strand-aware active context with `sessions.home` and Strand entries keyed by sessionId.
@@ -16,7 +27,6 @@
 - Added optional generic Codex delegation behind `CODEX_ENABLED=true` and `MULTI_SESSION_ENABLED=true`, including `codex_send`, `codex_check`, configurable `CODEX_DEFAULT_THREAD_ID`, and a dedicated `Codex` Strand for background completion.
 - Fixed PWA Strands tab rendering so inactive Strand runtime events render into their own session containers and tab switching opens at the latest messages.
 - Added PWA Strands behind `MULTI_SESSION_ENABLED=true`: Cal home plus up to 3 parallel in-memory PWA sessions with independent histories, status tabs, close-summary writeback, stale-session recovery, and local cross-session tools (`inject_context`, `search_session`).
-- Added optional Auto Heal Level 1 diagnosis and Level 2 approved-fix surgery with PM2 rollback support.
 - Added a provider-neutral Google Workspace MCP example with Drive/Docs search, read, create, and non-destructive batch update tools.
 - Added per-server MCP tool allowlist/blocklist policy enforcement and write-confirmation docs for Google Docs writes.
 - Increased the PWA single-message input window to 50K characters with a live counter.
@@ -25,7 +35,6 @@
 - Added runtime lifecycle WebSocket events for PWA status/tool/response updates.
 - Added `src/test.js` runtime smoke tests covering event ordering, command handling, and HTTP/WebSocket flow.
 - Fixed queued PWA steering so guidance is injected before every model call, not only between tool iterations.
-- Kept the public package provider-neutral while allowing the optional Auto Heal release surface.
 
 ## v1.0.0 - 2026-05-05
 

@@ -34,7 +34,6 @@ CAL keeps local memory, session history, handoffs, channels, scheduled routines,
 | **Omnipresence** | Use the same Cal from terminal, browser, PWA, Telegram, or iMessage |
 | **Strands** | Run up to 3 parallel PWA sessions alongside Cal home for focused work |
 | **Tool Use** | Let Claude call local and remote tools through a gateway you control |
-| **Auto Heal** | Optionally diagnose local gateway failures and apply approved fixes through a supervised PM2-backed workflow |
 
 ---
 
@@ -74,6 +73,12 @@ When a new session starts, it restores its own active task and sees a compact vi
 
 Cal ships with example configuration only. You choose the model, channels, MCP servers, jobs, and local integrations.
 
+### Talks with you.
+
+Connect the optional [Talkbox](https://github.com/monbishnoi/talkbox) runtime to use Cal through OpenAI Realtime voice. Cal remains the brain that owns context, memory, tools, and task answers; Talkbox enforces the voice boundary and the PWA carries microphone audio over WebRTC.
+
+Voice sessions hydrate from the active Home or Strand context, narrate meaningful progress during longer tool work, and write the transcript back into the same Cal session. See [Voice Mode with Talkbox](docs/voice.md).
+
 ---
 
 ## Cal Meets You Where You Are
@@ -100,10 +105,10 @@ Just talk to Cal:
 | **Mail** | Read and search mail through local setup scripts |
 | **Notes** | Read, write, and process notes |
 | **Web UI / PWA** | Use Cal in a richer browser interface and install it on mobile |
+| **Realtime Voice** | Talk naturally through an optional Talkbox/OpenAI Realtime runtime while Cal remains the agent brain |
 | **Telegram** | Use Cal privately through your own Telegram bot |
 | **iMessage** | Use Cal through local macOS messaging tools |
 | **Scheduled Jobs** | Run morning briefs, end-of-day summaries, handoffs, and memory consolidation |
-| **Auto Heal** | Disabled-by-default diagnosis and supervised repair for recurring gateway failures |
 | **Web Search** | Search the web when an API key is configured |
 | **File Operations** | Read, write, edit files, and save prior assistant responses from session history without regenerating long text |
 | **MCP Servers** | Connect approved Model Context Protocol servers, including optional external-service examples such as Google Workspace |

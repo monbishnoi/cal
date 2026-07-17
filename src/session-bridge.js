@@ -38,7 +38,7 @@ export function __setLastHandoffPathForTest(path) {
  * @param {Object} mainSession - The main CalSession
  * @returns {Promise<{success: boolean, summary: string}>} - Handoff result
  */
-export async function performInSessionHandoff(mainSession) {
+export async function performInSessionHandoff(mainSession, options = {}) {
   console.log(`[SessionBridge] Performing in-session handoff for ${mainSession.sessionId}`);
 
   const today = getToday();
@@ -67,8 +67,12 @@ You are performing an automatic handoff to preserve this conversation before the
            "status": "handoff",
            "currentStep": "Context handoff at 90%",
            "completedSteps": ["Important completed steps"],
+           "remainingSteps": ["Unexecuted steps still required for end-to-end completion"],
            "nextSteps": ["Immediate next step"],
-           "blockers": []
+           "failedSteps": ["Attempted steps that failed and still need resolution"],
+           "blockers": [],
+           "continueAfterBridge": true,
+           "savedAt": "${timestamp}"
          },
          "summary": "Your summary here",
          "lastActive": "${timestamp}",
@@ -82,6 +86,8 @@ You are performing an automatic handoff to preserve this conversation before the
      }
    }
    \`\`\`
+
+   Treat \`activeTask\` as a remaining-work ledger. Put already executed work in \`completedSteps\`. Put only unexecuted work still required for end-to-end completion in \`remainingSteps\`. Put failed attempts that still need resolution in \`failedSteps\` and keep the needed resolution in \`remainingSteps\` or \`blockers\`. Set \`continueAfterBridge\` to \`true\` only when \`remainingSteps\` contains work that should continue after reset; otherwise set it to \`false\`.
 
 ## Daily Log Format
 
@@ -106,7 +112,7 @@ Append this to the daily log:
 
 ## After completing the handoff:
 
-Tell the user briefly: "Saved our session. Continuing..." — then the session will reset automatically.
+Do not tell the user anything. The gateway will show the bridge status and continue any remaining active task after reset.
 
 Do the handoff now.`;
 
@@ -116,13 +122,17 @@ Do the handoff now.`;
     mainSession.persistToDisk();
 
     // Send handoff prompt to the SAME session (Cal sees everything)
-    const result = await mainSession.sendMessage(handoffPrompt);
+    const result = await mainSession.sendMessage(handoffPrompt, {
+      internal: options.internal === true,
+      isHandoff: true,
+      maxIterations: 8,
+    });
 
     console.log(`[SessionBridge] Handoff completed, response length: ${result.text.length}`);
 
     // Extract summary from what Cal wrote (best effort)
     const summary = extractSummaryFromResponse(result.text);
-    writeActiveContext(mainSession, {
+    const entry = writeActiveContext(mainSession, {
       summary,
       status: 'handoff_complete',
       currentStep: 'Session context was saved at the bridge threshold.',
@@ -132,6 +142,8 @@ Do the handoff now.`;
     return {
       success: true,
       summary,
+      activeTask: entry.activeTask,
+      entry,
     };
 
   } catch (err) {
@@ -285,6 +297,84 @@ export function writeActiveContextsForSessions(sessionsOrRecords = [], options =
   return written;
 }
 
+export function getActiveTaskForSession(sessionId) {
+  const data = loadHandoffData();
+  if (!data?.sessions) return null;
+  const key = getSessionBridgeKey(sessionId);
+  return data.sessions[key]?.activeTask || null;
+}
+
+export function shouldContinueActiveTask(activeTask) {
+  if (!activeTask || typeof activeTask !== 'object') return false;
+  if (activeTask.continueAfterBridge !== true) return false;
+
+  const status = String(activeTask.status || '').toLowerCase();
+  if (['complete', 'completed', 'done', 'blocked', 'closed'].includes(status)) {
+    return false;
+  }
+
+  const remaining = activeTask.remainingSteps?.length
+    ? activeTask.remainingSteps
+    : activeTask.nextSteps || [];
+  return remaining.length > 0 || !!activeTask.currentStep;
+}
+
+export function buildContinuationPrompt(activeTask) {
+  const remaining = activeTask.remainingSteps?.length
+    ? activeTask.remainingSteps
+    : activeTask.nextSteps || [];
+
+  return [
+    '[SYSTEM: Session Bridge continuation]',
+    '',
+    'Continue the saved active task for this session.',
+    'Execute only work that is still remaining. Do not repeat completed steps.',
+    'If an attempted step failed but is still required, keep it in remaining work or blockers and continue resolving it.',
+    '',
+    'Active task:',
+    JSON.stringify({
+      description: activeTask.description,
+      workstream: activeTask.workstream,
+      status: activeTask.status,
+      currentStep: activeTask.currentStep,
+      completedSteps: activeTask.completedSteps || [],
+      remainingSteps: remaining,
+      failedSteps: activeTask.failedSteps || [],
+      blockers: activeTask.blockers || [],
+    }, null, 2),
+  ].join('\n');
+}
+
+export async function resetAndContinueAfterBridge(session, activeTask = null, options = {}) {
+  const task = activeTask || getActiveTaskForSession(session?.sessionId);
+
+  session.reset();
+  session.isInitialized = false;
+  if (typeof session.initialize === 'function') {
+    await session.initialize();
+  }
+
+  if (!shouldContinueActiveTask(task)) {
+    return {
+      continued: false,
+      text: '',
+      usageStatus: session.getUsageStatus?.() || null,
+    };
+  }
+
+  const result = await session.sendMessage(buildContinuationPrompt(task), {
+    internal: options.internal === true,
+    isBridgeContinuation: true,
+    maxIterations: options.maxIterations || 10,
+  });
+
+  return {
+    continued: true,
+    text: result.text || '',
+    usageStatus: result.usageStatus || null,
+  };
+}
+
 /**
  * Load handoff data from disk
  * Used by context.js for session restoration
@@ -411,20 +501,32 @@ function buildActiveTask(session, previousTask, options) {
       previousTask?.currentStep ||
       'Awaiting the next user message.',
     completedSteps: options.completedSteps || previousTask?.completedSteps || [],
+    remainingSteps: options.remainingSteps || previousTask?.remainingSteps || previousTask?.nextSteps || [],
     nextSteps: options.nextSteps || previousTask?.nextSteps || [],
+    failedSteps: options.failedSteps || previousTask?.failedSteps || [],
     blockers: options.blockers || previousTask?.blockers || [],
+    continueAfterBridge: options.continueAfterBridge ?? previousTask?.continueAfterBridge ?? false,
+    savedAt: options.savedAt || new Date().toISOString(),
   });
 }
 
 function normalizeActiveTask(task) {
+  const completedSteps = Array.isArray(task?.completedSteps) ? task.completedSteps : [];
+  const nextSteps = Array.isArray(task?.nextSteps) ? task.nextSteps : [];
+  const remainingSteps = Array.isArray(task?.remainingSteps) ? task.remainingSteps : nextSteps;
+
   return {
     description: String(task?.description || 'No active task captured yet'),
     workstream: task?.workstream || null,
     status: String(task?.status || 'ready'),
     currentStep: String(task?.currentStep || 'Awaiting the next user message.'),
-    completedSteps: Array.isArray(task?.completedSteps) ? task.completedSteps : [],
-    nextSteps: Array.isArray(task?.nextSteps) ? task.nextSteps : [],
+    completedSteps,
+    remainingSteps,
+    nextSteps,
+    failedSteps: Array.isArray(task?.failedSteps) ? task.failedSteps : [],
     blockers: Array.isArray(task?.blockers) ? task.blockers : [],
+    continueAfterBridge: task?.continueAfterBridge === true,
+    savedAt: task?.savedAt || new Date().toISOString(),
   };
 }
 

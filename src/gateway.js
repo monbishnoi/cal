@@ -30,6 +30,10 @@ import { initializeCodexBridge, validateCodexStartupConfig, isCodexEnabled } fro
 import { writeActiveContextsForSessions } from './session-bridge.js';
 import fs from 'fs';
 import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 let startTelegram = null;
 let stopTelegram = null;
@@ -49,7 +53,7 @@ try {
 }
 
 // Gateway version
-const VERSION = '0.4.0';
+const VERSION = '2.0.0';
 
 // Session IDs (from user config)
 const MAIN_SESSION_ID = getMainSessionId();
@@ -299,6 +303,35 @@ async function recordBackgroundJobPointer(job, archivePath) {
   console.log(`[Gateway] Recorded ${job.id} archive pointer in main session`);
 }
 
+async function runAfterSuccessCommand(job) {
+  if (!job.afterSuccessCommand) return null;
+
+  const command = Array.isArray(job.afterSuccessCommand)
+    ? job.afterSuccessCommand
+    : [job.afterSuccessCommand];
+  const [executable, ...args] = command;
+  if (!executable || typeof executable !== 'string') {
+    throw new Error(`Invalid afterSuccessCommand for job ${job.id}`);
+  }
+
+  const executablePath = path.resolve(CAL_HOME, executable);
+  const relativePath = path.relative(CAL_HOME, executablePath);
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error(`afterSuccessCommand must remain inside CAL_HOME: ${executable}`);
+  }
+
+  console.log(`[Gateway] Running after-success command for ${job.id}: ${relativePath}`);
+  const { stdout, stderr } = await execFileAsync(executablePath, args, {
+    cwd: CAL_HOME,
+    env: process.env,
+    timeout: 5 * 60 * 1000,
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  if (stdout?.trim()) console.log(`[Gateway] ${job.id} after-success: ${stdout.trim()}`);
+  if (stderr?.trim()) console.warn(`[Gateway] ${job.id} after-success stderr: ${stderr.trim()}`);
+  return stdout || '';
+}
+
 /**
  * Job executor - called when a scheduled job fires
  * Uses shared session for interactive jobs, separate session for background jobs
@@ -337,6 +370,8 @@ async function executeJob(job) {
     });
 
     const response = result.text;
+
+    await runAfterSuccessCommand(job);
 
     const deliveryResponse = getJobDeliveryResponse(job, response, session, messageStartIndex);
 

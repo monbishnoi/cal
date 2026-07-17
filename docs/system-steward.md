@@ -30,7 +30,7 @@ CAL makes continuity user-owned. Memory, sessions, routines, handoffs, and local
 | Gateway | Routes attention to what matters | Channels, skills, tools, scheduled briefs |
 | Custodian | Maintains valuable state | `context/`, `memory/`, session store, handoff files |
 | Witness | Observes patterns over time | Daily logs, memory consolidation, recurring reviews |
-| Advocate | Represents the system's interests | Briefs, pushback prompts, Auto Heal review proposals |
+| Advocate | Represents the system's interests | Briefs, pushback prompts, and proactive reminders |
 | Membrane | Makes boundary judgments | Optional integrations, explicit config, local/private defaults |
 | Evolver | Improves the steward itself | Skills, memory maintenance, repair proposals, future self-improvement |
 
@@ -44,7 +44,6 @@ The public release focuses on a personal steward:
 - Local memory and session continuity
 - Scheduled jobs for briefs and consolidation
 - Generic MCP support so other clients can call CAL as a capability layer
-- Disabled-by-default Auto Heal review for proposal-only repair workflows
 
 ## Future Direction
 
@@ -57,4 +56,3 @@ The same architecture can steward other systems by changing the model, tools, an
 - a community or knowledge base
 
 CAL is the first instance of a broader pattern: user-owned continuity for systems that matter.
-

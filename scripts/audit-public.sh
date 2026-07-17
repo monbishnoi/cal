@@ -62,18 +62,21 @@ check_absent_pattern "private self-healing references" "AutoHeal|autoheal|Wolver
 check_absent_pattern "machine-specific paths" "/Users/I306141|/Users/[^/[:space:]]+/harness"
 check_absent_pattern "personal identity references" "monika|Monika|mon\\.bishnoi"
 
-# monbishnoi is the repo owner — allowed in README.md (clone URL) and package.json (author)
+# monbishnoi is the public repository owner; repository links are allowed in
+# published documentation, but the personal-name audit above remains active.
 if rg -n "monbishnoi" . \
   --glob '!node_modules/**' \
   --glob '!**/.git/**' \
   --glob '!scripts/audit-public.sh' \
   --glob '!README.md' \
+  --glob '!docs/*.html' \
+  --glob '!docs/voice.md' \
   --glob '!package.json' >/tmp/cal-public-audit.txt; then
-  echo "FAIL forbidden text found: monbishnoi outside README/package.json"
+  echo "FAIL forbidden text found: monbishnoi outside approved repository links"
   cat /tmp/cal-public-audit.txt
   FAIL=1
 else
-  echo "OK monbishnoi (only in README.md and package.json)"
+  echo "OK monbishnoi (only in approved repository links)"
 fi
 check_absent_pattern "secret-like values" "sk-ant-|xox[baprs]-|TELEGRAM_BOT_TOKEN=[0-9]{6,}:|ANTHROPIC_API_KEY=sk-"
 

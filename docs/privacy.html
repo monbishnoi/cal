@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy — Cal</title>
+    <meta name="description" content="Cal is local-first and privacy-first: memory, files, and conversations stay on your machine by default.">
+    <meta property="og:title" content="Privacy — Cal">
+    <meta property="og:description" content="Your data stays local unless you explicitly send it somewhere.">
+    <meta property="og:type" content="website">
+    <link rel="stylesheet" href="styles.css?v=public-1">
+</head>
+<body>
+    <nav>
+        <div class="container nav-container">
+            <strong><a href="index.html" class="nav-brand">Cal</a></strong>
+            <button class="nav-toggle" aria-label="Toggle navigation" onclick="this.classList.toggle('active'); document.querySelector('.nav-links').classList.toggle('open')">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-links">
+                <li><a href="getting-started.html">Get Started</a></li>
+                <li><a href="capabilities.html">Capabilities</a></li>
+                <li><a href="channels.html">Channels</a></li>
+                <li><a href="privacy.html">Privacy</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="page-layout">
+        <main class="page-content">
+            <header style="margin-bottom: 3rem;">
+                <h1>Privacy</h1>
+                <p style="font-size: 1.25rem; color: var(--text-secondary);">Local-first, privacy-first. Your data stays yours.</p>
+            </header>
+
+            <section id="core-principle">
+                <h2>The Core Principle</h2>
+                <p>Cal is designed around a simple idea: <strong>your data never leaves your Mac unless you explicitly send it somewhere.</strong></p>
+                <p>This is not just a feature. It is the architecture. Cal runs on your machine, stores memory locally, and reaches external services only when the configured workflow requires it.</p>
+            </section>
+
+            <section id="stays-local">
+                <h2>What Stays Local</h2>
+                <div class="grid">
+                    <article><h3>Your Conversations</h3><p>Messages are stored in local session files. No cloud sync. No telemetry. No model training on your private data.</p></article>
+                    <article><h3>Your Memory</h3><p>Cal's memory lives in plain markdown and JSON files. You can read, edit, move, or delete them anytime.</p></article>
+                    <article><h3>Your Calendar, Mail, Notes</h3><p>Cal reads local apps through local APIs and command-line tools. Relevant snippets are sent to the model only when needed for your request.</p></article>
+                    <article><h3>Your Files</h3><p>When Cal reads or edits files, it does so directly on your filesystem.</p></article>
+                </div>
+            </section>
+
+            <section id="leaves-mac">
+                <h2>What Leaves Your Mac</h2>
+                <p>Cal needs a model API to reason. Here is the default boundary:</p>
+                <div class="table-wrap"><table>
+                    <thead>
+                        <tr><th>What</th><th>Where</th><th>Why</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>Your messages</strong></td><td>Claude API or your configured model endpoint</td><td>To get responses</td></tr>
+                        <tr><td><strong>Relevant context</strong></td><td>Claude API or your configured model endpoint</td><td>So the model can answer with the needed context</td></tr>
+                        <tr><td><strong>Web searches</strong></td><td>Your configured search provider</td><td>Only when you ask Cal to search the web</td></tr>
+                    </tbody>
+                </table></div>
+                <p>No analytics. No usage tracking. No external memory sync unless you configure one.</p>
+            </section>
+
+            <section id="api-boundary">
+                <h2>Model API Boundary</h2>
+                <p>Cal can use Anthropic's Claude API directly or a compatible endpoint you configure. The gateway treats the model provider as a reasoning service, not as the source of truth.</p>
+                <ul>
+                    <li><strong>Local source of truth:</strong> memory and state remain in your local files</li>
+                    <li><strong>Bring your own key:</strong> credentials live in your local environment/config</li>
+                    <li><strong>Explicit context:</strong> Cal sends the model the context needed for a request, not your entire filesystem</li>
+                </ul>
+            </section>
+
+            <section id="imessage-privacy">
+                <h2>iMessage Privacy</h2>
+                <ul>
+                    <li><strong>Messages read locally:</strong> Cal reads the Messages database on your Mac</li>
+                    <li><strong>Identity separation:</strong> Cal can respond from a separate configured identity</li>
+                    <li><strong>No relay server:</strong> messages are not proxied through a custom service</li>
+                </ul>
+            </section>
+
+            <section id="control">
+                <h2>You Are in Control</h2>
+                <article><h3>See everything Cal knows</h3><p>Memory is stored as files you can inspect directly.</p></article>
+                <article><h3>Delete anything, anytime</h3><p>Want Cal to forget something? Delete or edit the relevant memory file.</p></article>
+                <article><h3>Audit the code</h3><p>Cal is open source. Read the code, understand what it does, and modify it for your environment.</p></article>
+            </section>
+
+            <section id="never-do">
+                <h2>What Cal Will Never Do by Design</h2>
+                <ul>
+                    <li>Send your data to third parties for training</li>
+                    <li>Store your conversations on a Cal-owned server</li>
+                    <li>Track your usage for analytics</li>
+                    <li>Share your information across users</li>
+                    <li>Access data you have not explicitly granted access to</li>
+                </ul>
+            </section>
+        </main>
+
+        <aside class="toc-sidebar"></aside>
+    </div>
+
+    <footer class="container">
+        <p>Cal — your thinking partner. <a href="https://github.com/monbishnoi/cal">Star on GitHub</a></p>
+    </footer>
+
+    <script src="toc.js"></script>
+</body>
+</html>

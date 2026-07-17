@@ -49,7 +49,7 @@ Profile overlays can be added as `config/jobs.<profile>.json` and selected with 
 | Memory | Keep useful state user-owned | `context/`, `memory/`, `src/context.js` |
 | Action | Observe and influence the system | `src/tools.js`, `src/mcp-client.js`, `src/mcp-server.js` |
 | Routine | Maintain cadence over time | `src/scheduler.js`, `config/jobs.example.json` |
-| Evolution | Improve behavior and repair proposals | `skills/`, Auto Heal review job |
+| Evolution | Improve reusable behavior | `skills/`, memory maintenance |
 
 ## MCP Servers
 

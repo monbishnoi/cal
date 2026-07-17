@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cal — A Self-Evolving Agentic Thinking Partner</title>
+    <meta name="description" content="Cal is a local-first AI agent harness with memory, tools, channels, and self-healing infrastructure.">
+    <meta property="og:title" content="Cal — A Self-Evolving Agentic Thinking Partner">
+    <meta property="og:description" content="A privacy-first agent harness that remembers you, acts for you, and improves over time.">
+    <meta property="og:type" content="website">
+    <link rel="stylesheet" href="styles.css?v=public-1">
+</head>
+<body>
+    <nav>
+        <div class="container nav-container">
+            <strong><a href="index.html" class="nav-brand">Cal</a></strong>
+            <button class="nav-toggle" aria-label="Toggle navigation" onclick="this.classList.toggle('active'); document.querySelector('.nav-links').classList.toggle('open')">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-links">
+                <li><a href="getting-started.html">Get Started</a></li>
+                <li><a href="capabilities.html">Capabilities</a></li>
+                <li><a href="channels.html">Channels</a></li>
+                <li><a href="privacy.html">Privacy</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="hero container">
+        <h1>Cal</h1>
+        <p class="tagline">A self-evolving agentic thinking partner.</p>
+        <p class="subtitle">Local-first, privacy-first. Remembers you, acts for you, meets you where you are, and improves itself over time. Built for builders who want an AI thinking partner.</p>
+        <p class="inspiration">Named after Kal-El (Superman), not HAL 9000.</p>
+    </header>
+
+    <main class="container">
+        <section>
+            <h2>The Superpowers</h2>
+            <div class="table-wrap"><table>
+                <thead>
+                    <tr><th>Power</th><th>What It Does</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>X-Ray Vision</strong></td><td>See across your calendar, email, notes, files, and approved Google Docs in one place</td></tr>
+                    <tr><td><strong>Super Memory</strong></td><td>Five-layer memory with local semantic understanding</td></tr>
+                    <tr><td><strong>Speed</strong></td><td>Morning briefs, end-of-day summaries, consolidation, and scheduled work</td></tr>
+                    <tr><td><strong>Self-Healing</strong></td><td>Detects problems, recovers context, and can propose repairs</td></tr>
+                    <tr><td><strong>Omnipresence</strong></td><td>Terminal, phone, and browser access with the same memory everywhere</td></tr>
+                </tbody>
+            </table></div>
+        </section>
+
+        <section>
+            <h2>What Does That Actually Mean?</h2>
+
+            <article>
+                <h3>Local-first, privacy-first</h3>
+                <p>Your data stays on your machine by default. Cal runs locally, stores memory as plain files, and uses Anthropic's Claude API only when it needs model reasoning.</p>
+            </article>
+
+            <article>
+                <h3>Remembers you meaningfully</h3>
+                <p>Cal does not just store files and search them. It builds a five-layer memory system, including local semantic indexing, so it can connect work, projects, preferences, and context across sessions.</p>
+                <p><a href="capabilities.html#memory">Learn how Cal's memory works →</a></p>
+            </article>
+
+            <article>
+                <h3>Acts for you</h3>
+                <p>Cal does not just chat. It reads calendars, searches mail, creates notes, finds files, runs commands, and can work with Google Docs when the optional Google Workspace MCP is enabled.</p>
+            </article>
+
+            <article>
+                <h3>Meets you where you are</h3>
+                <p>Terminal when you are deep in code. iMessage or Telegram when you are on the go. Web UI from any browser. Same memory, same context, different doors.</p>
+            </article>
+
+            <article>
+                <h3>Improves itself over time</h3>
+                <p>Cal preserves context at token limits, recovers interrupted sessions, and refreshes compact startup memory so useful context survives without bloating every new session.</p>
+            </article>
+        </section>
+
+        <section>
+            <h2>Google Workspace MCP</h2>
+            <p>Cal includes an optional Google Workspace MCP wrapper for Google Docs workflows. Phase 1 is intentionally narrow: search Docs in Drive, read Docs, create Docs, and run confirmed non-destructive Docs batch updates.</p>
+            <div class="grid">
+                <article>
+                    <h3>Useful by default</h3>
+                    <p>Ask Cal to find a planning doc, summarize a Google Doc, create a prep note, or apply an approved edit to an existing document.</p>
+                </article>
+                <article>
+                    <h3>Safety boundary</h3>
+                    <p>Deletion, sharing, permission changes, and ownership transfer are not exposed. Writes require a confirmation token before they run.</p>
+                </article>
+            </div>
+            <p class="centered"><a href="capabilities.html#google-workspace" role="button">View Google Workspace Capability</a></p>
+        </section>
+
+        <section>
+            <h2>Meet Cal Where You Are</h2>
+            <div class="screenshots">
+                <figure class="screenshot">
+                    <img src="assets/screenshots/terminal.png" alt="Terminal">
+                    <figcaption>Terminal</figcaption>
+                </figure>
+                <figure class="screenshot">
+                    <img src="assets/screenshots/imessage.png" alt="iMessage">
+                    <figcaption>iMessage</figcaption>
+                </figure>
+                <figure class="screenshot">
+                    <img src="assets/screenshots/pwa.png" alt="Web UI">
+                    <figcaption>Web UI</figcaption>
+                </figure>
+            </div>
+            <p class="centered">All channels share the same session. Start on Terminal, continue on iMessage, finish in the Web UI.</p>
+        </section>
+
+        <section>
+            <h2>Get Started</h2>
+            <pre><code>git clone https://github.com/monbishnoi/cal.git
+cd cal
+npm install
+cp config/env.example config/.env</code></pre>
+            <p class="centered" style="margin-top: 2rem;">
+                <a href="getting-started.html" role="button">View Full Setup Guide</a>
+                <a href="https://github.com/monbishnoi/cal" role="button" class="secondary">Star on GitHub</a>
+            </p>
+        </section>
+    </main>
+
+    <footer class="container">
+        <p>Cal — your thinking partner.</p>
+    </footer>
+</body>
+</html>

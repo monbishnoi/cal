@@ -38,21 +38,10 @@
       "cron": "0 22 * * *",
       "maxIterations": 25,
       "sessionType": "background",
+      "afterSuccessCommand": ["scripts/refresh-startup-memory.sh"],
       "prompt": "Review today's local notes if available and extract durable preferences, decisions, active projects, and follow-ups into the configured memory files. Skip duplicates and flag contradictions instead of deleting anything.",
       "output": "file",
       "outputPath": "memory/consolidation-log.md",
-      "enabled": false
-    },
-    {
-      "id": "auto-heal-review",
-      "name": "Auto Heal Review",
-      "cron": "0 9 * * 1",
-      "maxIterations": 20,
-      "sessionType": "background",
-      "featureFlag": "autoHeal",
-      "prompt": "Review recent gateway logs and session errors. Identify reproducible failures, likely root causes, and minimal proposed fixes. Do not apply code changes automatically; write a concise repair proposal with commands or files to inspect next.",
-      "output": "file",
-      "outputPath": "memory/auto-heal/YYYY-MM-DD-proposal.md",
       "enabled": false
     }
   ],
@@ -66,11 +55,6 @@
       "httpEndpoint": "",
       "collections": ["context", "memory", "docs"],
       "_comment": "Optional. Run setup/qmd-setup.sh to choose a local port and enable QMD."
-    },
-    "autoHeal": {
-      "enabled": false,
-      "mode": "proposal",
-      "_comment": "Optional generic repair review. Disabled by default and proposal-only in the public template."
     },
     "loopPilot": {
       "enabled": false,

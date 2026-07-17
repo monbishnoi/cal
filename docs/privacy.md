@@ -21,4 +21,3 @@ Cal talks to Anthropic by default when you provide an API key. Optional services
 - Scheduled jobs are disabled by default.
 - MCP servers are disabled by default.
 - iMessage skips outside macOS or when the local messaging tool is unavailable.
-- Auto Heal review is disabled by default and proposal-only in the public template.

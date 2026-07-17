@@ -1,14 +1,14 @@
 /**
  * Context Loader for Cal Gateway
  *
- * Builds system prompt from CAL.md (identity), MEMORY.md (long-term memory),
+ * Builds system prompt from CAL.md (identity), STARTUP-MEMORY.md,
  * USER.md (user profile), and today's daily log.
  * Includes Session Bridge restoration for continuity after handoffs.
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { CAL_HOME, MEMORY_DIR, CONTEXT_DIR, DATA_DIR } from './paths.js';
+import { CAL_HOME, MEMORY_DIR, DATA_DIR, MEMORY_FILE, STARTUP_MEMORY_FILE, USER_FILE } from './paths.js';
 import { getTimezone, getLocale } from './user-config.js';
 
 const DEFAULT_LAST_HANDOFF_PATH = join(DATA_DIR, 'last-handoff.json');
@@ -31,18 +31,21 @@ export function loadSystemPrompt(sessionId = null) {
     parts.push('# Cal\'s Identity (CAL.md)\n\n' + calMd);
   }
 
-  // 2. Load MEMORY.md (long-term memory) - first 200 lines only
-  const memoryMdPath = join(CONTEXT_DIR, 'MEMORY.md');
-  if (existsSync(memoryMdPath)) {
-    const memoryMd = readFileSync(memoryMdPath, 'utf8');
+  // 2. Load canonical active memory. STARTUP-MEMORY.md is a generated,
+  // bounded projection of the durable MEMORY.md/QMD retrieval source.
+  // Fall back to a legacy MEMORY.md slice only when the projection is absent.
+  if (existsSync(STARTUP_MEMORY_FILE)) {
+    const startupMemory = readFileSync(STARTUP_MEMORY_FILE, 'utf8');
+    parts.push('\n\n# Startup Memory (STARTUP-MEMORY.md)\n\n' + startupMemory);
+  } else if (existsSync(MEMORY_FILE)) {
+    const memoryMd = readFileSync(MEMORY_FILE, 'utf8');
     const lines = memoryMd.split('\n').slice(0, 200);
-    parts.push('\n\n# Long-Term Memory (MEMORY.md)\n\n' + lines.join('\n'));
+    parts.push('\n\n# Long-Term Memory Fallback (MEMORY.md first 200 lines)\n\n' + lines.join('\n'));
   }
 
   // 3. Load USER.md (user profile)
-  const userMdPath = join(CONTEXT_DIR, 'USER.md');
-  if (existsSync(userMdPath)) {
-    const userMd = readFileSync(userMdPath, 'utf8');
+  if (existsSync(USER_FILE)) {
+    const userMd = readFileSync(USER_FILE, 'utf8');
     parts.push('\n\n# User Profile (USER.md)\n\n' + userMd);
   }
 
@@ -200,8 +203,15 @@ function formatSessionEntry(entry, { detailed = false } = {}) {
 
   if (task.workstream) lines.push(`Workstream: ${task.workstream}`);
   if (task.currentStep) lines.push(`Current step: ${task.currentStep}`);
+  if (task.savedAt) lines.push(`Saved at: ${task.savedAt}`);
   if (detailed && Array.isArray(task.completedSteps) && task.completedSteps.length) {
     lines.push(`Completed: ${task.completedSteps.join('; ')}`);
+  }
+  if (detailed && Array.isArray(task.remainingSteps) && task.remainingSteps.length) {
+    lines.push(`Remaining: ${task.remainingSteps.join('; ')}`);
+  }
+  if (detailed && Array.isArray(task.failedSteps) && task.failedSteps.length) {
+    lines.push(`Failed but unresolved: ${task.failedSteps.join('; ')}`);
   }
   if (detailed && Array.isArray(task.nextSteps) && task.nextSteps.length) {
     lines.push(`Next: ${task.nextSteps.join('; ')}`);

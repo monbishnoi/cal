@@ -33,6 +33,7 @@ export const SKILLS_DIR = path.join(CAL_HOME, 'skills');
 
 // Commonly used file paths
 export const MEMORY_FILE = path.join(CONTEXT_DIR, 'MEMORY.md');
+export const STARTUP_MEMORY_FILE = path.join(CONTEXT_DIR, 'STARTUP-MEMORY.md');
 export const USER_FILE = path.join(CONTEXT_DIR, 'USER.md');
 export const ACTION_ITEMS_FILE = path.join(CONTEXT_DIR, 'ACTION-ITEMS.md');
 

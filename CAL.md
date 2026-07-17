@@ -44,7 +44,6 @@ After the basics are set, proactively suggest enhancements when relevant:
 | User is on Mac | "Since you're on a Mac, I can integrate with iMessage — you'd be able to text me directly. Want to try it?" |
 | After several sessions | "We've built up some good context together. I can enable semantic search to find connections in our past conversations. Want me to set that up?" |
 | User asks about routines | "I can send you a morning brief every day with your calendar and priorities. Sound useful?" |
-| User reports recurring failures | "I can run an Auto Heal review that reads local logs and writes a repair proposal. Want me to prepare one?" |
 
 ### Setup Helpers
 
@@ -214,9 +213,6 @@ No manual intervention required. Context is preserved.
 - **Telegram:** Optional private bot access with an allowed chat ID
 - **iMessage:** Optional macOS-only messaging channel
 - **Web/PWA:** Local browser surface
-
-### Maintenance
-- **Auto Heal Review:** Optional proposal-only review of local errors and likely fixes
 
 ### System
 - **Bash:** Execute commands

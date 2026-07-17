@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Channels — Cal</title>
+    <meta name="description" content="Use Cal from Terminal, Web UI, iMessage, and Telegram with the same memory and session.">
+    <meta property="og:title" content="Channels — Cal">
+    <meta property="og:description" content="Same Cal, same memory, different doors.">
+    <meta property="og:type" content="website">
+    <link rel="stylesheet" href="styles.css?v=public-1">
+</head>
+<body>
+    <nav>
+        <div class="container nav-container">
+            <strong><a href="index.html" class="nav-brand">Cal</a></strong>
+            <button class="nav-toggle" aria-label="Toggle navigation" onclick="this.classList.toggle('active'); document.querySelector('.nav-links').classList.toggle('open')">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-links">
+                <li><a href="getting-started.html">Get Started</a></li>
+                <li><a href="capabilities.html">Capabilities</a></li>
+                <li><a href="channels.html">Channels</a></li>
+                <li><a href="privacy.html">Privacy</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="page-layout">
+        <main class="page-content">
+            <header style="margin-bottom: 3rem;">
+                <h1>Channels</h1>
+                <p style="font-size: 1.25rem; color: var(--text-secondary);">Meet Cal where you are. Same memory, same context, different doors.</p>
+            </header>
+
+            <section id="overview">
+                <h2>Overview</h2>
+                <div class="table-wrap"><table>
+                    <thead>
+                        <tr><th>Channel</th><th>Access</th><th>Best For</th><th>Setup</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>Terminal</strong></td><td>Desktop</td><td>Deep work, coding, complex multi-step tasks</td><td>Built-in</td></tr>
+                        <tr><td><strong>Web UI (PWA)</strong></td><td>Mobile & Browser</td><td>Quick access, install as app</td><td>Built-in</td></tr>
+                        <tr><td><strong>iMessage</strong></td><td>Apple devices</td><td>Text Cal like a friend</td><td>Optional</td></tr>
+                        <tr><td><strong>Telegram</strong></td><td>Mobile & Browser</td><td>Remote access and quick prompts</td><td>Optional</td></tr>
+                    </tbody>
+                </table></div>
+                <p><strong>Key insight:</strong> All channels share the same session. Start a conversation on Terminal, continue on iMessage, finish in the Web UI.</p>
+
+                <div class="screenshots">
+                    <figure class="screenshot">
+                        <img src="assets/screenshots/terminal.png" alt="Terminal">
+                        <figcaption>Terminal</figcaption>
+                    </figure>
+                    <figure class="screenshot">
+                        <img src="assets/screenshots/pwa.png" alt="Web UI">
+                        <figcaption>Web UI</figcaption>
+                    </figure>
+                    <figure class="screenshot">
+                        <img src="assets/screenshots/imessage.png" alt="iMessage">
+                        <figcaption>iMessage</figcaption>
+                    </figure>
+                </div>
+            </section>
+
+            <section id="terminal">
+                <h2>Terminal</h2>
+                <p><strong>Best for:</strong> Deep work, coding with Claude Code, complex multi-step tasks.</p>
+                <article>
+                    <h3>What You Get</h3>
+                    <ul>
+                        <li><strong>Cal's Memory</strong> — your personal context, preferences, and history</li>
+                        <li><strong>Cal's Personality</strong> — the same thinking partner behavior everywhere</li>
+                        <li><strong>Cross-Channel Context</strong> — Cal knows what you discussed earlier</li>
+                        <li><strong>Custom Tools</strong> — calendar, mail, notes, files, search, and any MCP servers you add</li>
+                        <li><strong>Claude Code's Power</strong> — file editing, git, code analysis, and large-context work</li>
+                    </ul>
+                </article>
+                <article>
+                    <h3>Setup</h3>
+                    <pre><code>cal</code></pre>
+                </article>
+            </section>
+
+            <section id="web-ui">
+                <h2>Web UI (PWA)</h2>
+                <p><strong>Best for:</strong> Quick access from any browser, install as a mobile app.</p>
+                <article>
+                    <h3>Features</h3>
+                    <ul>
+                        <li>Works in any browser</li>
+                        <li>Installable as a Progressive Web App on your phone</li>
+                        <li>Same session as all other channels</li>
+                        <li>Clean interface for quick prompts and session review</li>
+                    </ul>
+                </article>
+                <article>
+                    <h3>Setup</h3>
+                    <p>No setup required. The Web UI runs when Cal Gateway starts.</p>
+                    <pre><code># Install as PWA on iPhone
+# 1. Open the Web UI URL in Safari
+# 2. Tap Share → Add to Home Screen
+# 3. Name it "Cal"</code></pre>
+                </article>
+            </section>
+
+            <section id="imessage">
+                <h2>iMessage</h2>
+                <p><strong>Best for:</strong> On-the-go queries from Apple devices.</p>
+                <article>
+                    <h3>Features</h3>
+                    <ul>
+                        <li>Native Apple Messages integration</li>
+                        <li>Works on Mac, iPhone, iPad, and Apple Watch</li>
+                        <li>Messages are read locally from your Mac</li>
+                        <li>Identity separation is configurable</li>
+                    </ul>
+                </article>
+                <article>
+                    <h3>Setup</h3>
+                    <ol>
+                        <li><strong>Install imsg:</strong> <code>brew install imsg</code></li>
+                        <li><strong>Grant Full Disk Access</strong> to imsg and node</li>
+                        <li><strong>Configure identity</strong> in <code>config/imessage.json</code></li>
+                        <li><strong>Restart Gateway</strong></li>
+                    </ol>
+                </article>
+            </section>
+
+            <section id="telegram">
+                <h2>Telegram</h2>
+                <p><strong>Best for:</strong> Remote access from any device with a configured bot.</p>
+                <article>
+                    <h3>Features</h3>
+                    <ul>
+                        <li>Mobile-friendly access when you are away from your Mac</li>
+                        <li>Shared Cal session and memory</li>
+                        <li>Works well for quick status checks, reminders, and brief research prompts</li>
+                    </ul>
+                </article>
+                <article>
+                    <h3>Setup</h3>
+                    <p>Create a Telegram bot, add the token to your local config, and restart the gateway.</p>
+                </article>
+            </section>
+        </main>
+
+        <aside class="toc-sidebar"></aside>
+    </div>
+
+    <footer class="container">
+        <p>Cal — your thinking partner. <a href="https://github.com/monbishnoi/cal">Star on GitHub</a></p>
+    </footer>
+
+    <script src="toc.js"></script>
+</body>
+</html>

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capabilities — Cal</title>
+    <meta name="description" content="Explore Cal's memory, tools, channels, session continuity, scheduled jobs, and local-first integrations.">
+    <meta property="og:title" content="Capabilities — Cal">
+    <meta property="og:description" content="Everything Cal can do through natural conversation.">
+    <meta property="og:type" content="website">
+    <link rel="stylesheet" href="styles.css?v=public-1">
+</head>
+<body>
+    <nav>
+        <div class="container nav-container">
+            <strong><a href="index.html" class="nav-brand">Cal</a></strong>
+            <button class="nav-toggle" aria-label="Toggle navigation" onclick="this.classList.toggle('active'); document.querySelector('.nav-links').classList.toggle('open')">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-links">
+                <li><a href="getting-started.html">Get Started</a></li>
+                <li><a href="capabilities.html">Capabilities</a></li>
+                <li><a href="channels.html">Channels</a></li>
+                <li><a href="privacy.html">Privacy</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="page-layout">
+        <main class="page-content">
+            <header style="margin-bottom: 3rem;">
+                <h1>Capabilities</h1>
+                <p style="font-size: 1.25rem; color: var(--text-secondary);">Everything Cal can do for you.</p>
+            </header>
+
+            <section id="just-ask" class="examples-hook">
+                <h2>Just Ask</h2>
+                <div class="example-cards">
+                    <article class="example-card">
+                        <p class="example-quote">Find a 30-minute slot this week with Maya and send the invite.</p>
+                        <p class="example-result">Cal checks your calendar, finds availability, and creates the meeting.</p>
+                    </article>
+                    <article class="example-card">
+                        <p class="example-quote">I have a customer call Thursday. Find my last notes and create a prep doc.</p>
+                        <p class="example-result">Cal searches your knowledge base, reads relevant files, and synthesizes a local prep note.</p>
+                    </article>
+                    <article class="example-card">
+                        <p class="example-quote">What did we decide in last week's planning conversation?</p>
+                        <p class="example-result">Cal uses daily logs, long-term memory, and semantic search to recover the thread.</p>
+                    </article>
+                </div>
+            </section>
+
+            <section id="what-cal-can-do" class="capability-grid-section">
+                <h2>What Cal Can Do</h2>
+                <p style="margin-bottom: 1.5rem;">All through natural conversation.</p>
+                <div class="capability-grid">
+                    <div class="capability-box"><span class="capability-icon">📅</span><h3>Calendar</h3><ul><li>Read schedule</li><li>Create events</li><li>Set reminders</li><li>Plan meetings</li></ul></div>
+                    <div class="capability-box"><span class="capability-icon">📧</span><h3>Email</h3><ul><li>Search mail</li><li>Summarize threads</li><li>Draft messages</li><li>Use local clients</li></ul></div>
+                    <div class="capability-box"><span class="capability-icon">📝</span><h3>Notes</h3><ul><li>Read notes</li><li>Create notes</li><li>Search content</li><li>Apple Notes + Obsidian</li></ul></div>
+                    <div class="capability-box"><span class="capability-icon">📁</span><h3>Files</h3><ul><li>Read files</li><li>Write and edit</li><li>Search folders</li><li>Run local workflows</li></ul></div>
+                    <div class="capability-box"><span class="capability-icon">🔍</span><h3>Search</h3><ul><li>Web search</li><li>Keyword search</li><li>Semantic search</li><li>Knowledge recall</li></ul></div>
+                    <div class="capability-box"><span class="capability-icon">📄</span><h3>Google Workspace</h3><ul><li>Search Docs</li><li>Read Docs</li><li>Create Docs</li><li>Confirmed safe updates</li></ul></div>
+                    <div class="capability-box"><span class="capability-icon">🧠</span><h3>Memory</h3><ul><li>Daily logs</li><li>Long-term facts</li><li>Cross-session context</li><li>Local semantic index</li></ul></div>
+                    <div class="capability-box"><span class="capability-icon">🛠</span><h3>Continuity</h3><ul><li>Session bridge</li><li>Graceful recovery</li><li>Startup memory</li><li>Nightly refresh</li></ul></div>
+                </div>
+            </section>
+
+            <section id="full-list">
+                <h2>Full Capability List</h2>
+                <div class="table-wrap"><table>
+                    <thead>
+                        <tr><th>Capability</th><th>What It Does</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>Conversation</strong></td><td>Chat naturally; Cal remembers context across sessions, days, and weeks</td></tr>
+                        <tr><td><strong>Calendar</strong></td><td>Read your schedule and create events via Apple Calendar tooling</td></tr>
+                        <tr><td><strong>Mail</strong></td><td>Read and search locally available email</td></tr>
+                        <tr><td><strong>Notes</strong></td><td>Read and write Apple Notes and Obsidian-style markdown notes</td></tr>
+                        <tr><td><strong>Reminders</strong></td><td>Create reminders through Apple Shortcuts</td></tr>
+                        <tr><td><strong>Semantic Search</strong></td><td>Find meaningful connections across your knowledge base</td></tr>
+                        <tr><td><strong>Web Search</strong></td><td>Search the web and bring back relevant information when configured</td></tr>
+                        <tr><td><strong>Google Workspace MCP</strong></td><td>Search/read Google Docs, create new Docs, and run confirmed non-destructive Docs batch updates through the official <code>gws</code> CLI wrapper</td></tr>
+                        <tr><td><strong>File Operations</strong></td><td>Read, write, and edit files on your Mac</td></tr>
+                        <tr><td><strong>Shell Commands</strong></td><td>Run terminal commands when needed</td></tr>
+                    </tbody>
+                </table></div>
+            </section>
+
+            <section id="google-workspace">
+                <h2>Google Workspace MCP</h2>
+                <p>Google Workspace is available as an optional MCP server for document workflows. It uses Google's <code>gws</code> CLI locally, so authentication stays under your Google account and the gateway only exposes the approved Phase 1 tools.</p>
+                <div class="table-wrap"><table>
+                    <thead>
+                        <tr><th>Tool</th><th>What It Does</th><th>Boundary</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>google_drive_search_docs</code></td><td>Searches Google Docs in Drive</td><td>Read-only</td></tr>
+                        <tr><td><code>google_docs_read</code></td><td>Reads a Google Doc by ID</td><td>Read-only</td></tr>
+                        <tr><td><code>google_docs_create</code></td><td>Creates a new Google Doc</td><td>Requires write confirmation</td></tr>
+                        <tr><td><code>google_docs_batch_update</code></td><td>Applies non-destructive Docs API batch updates</td><td>Requires write confirmation</td></tr>
+                    </tbody>
+                </table></div>
+                <h3>Setup</h3>
+                <pre><code>npm install -g @googleworkspace/cli
+gws auth login</code></pre>
+            </section>
+
+            <section id="memory">
+                <h2>Memory: The Five Layers</h2>
+                <p>Cal does not just dump files and search them. It actively builds five layers of memory, culminating in local semantic understanding.</p>
+                <div class="table-wrap"><table>
+                    <thead>
+                        <tr><th>Layer</th><th>What It Is</th><th>How It Works</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>1. Session Memory</strong></td><td>Current conversation context</td><td>Lives in RAM and is shared across channels</td></tr>
+                        <tr><td><strong>2. Daily Logs</strong></td><td>Raw chronological record</td><td>Markdown files written during sessions</td></tr>
+                        <tr><td><strong>3. Long-term Memory</strong></td><td>Curated facts and preferences</td><td>Consolidation extracts durable signal from daily logs</td></tr>
+                        <tr><td><strong>4. Keyword Index</strong></td><td>Full-text search</td><td>BM25-style indexing for direct lookup</td></tr>
+                        <tr><td><strong>5. Semantic Memory</strong></td><td>Associative understanding</td><td>Local embeddings create a vector database for meaning-based recall</td></tr>
+                    </tbody>
+                </table></div>
+            </section>
+
+            <section id="scheduled-jobs">
+                <h2>Scheduled Jobs</h2>
+                <p>Cal works even when you are not looking.</p>
+                <div class="table-wrap"><table>
+                    <thead>
+                        <tr><th>Job</th><th>When</th><th>What It Does</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>Morning Brief</strong></td><td>Early AM</td><td>Your calendar, priorities, and a nudge to start the day</td></tr>
+                        <tr><td><strong>News Digest</strong></td><td>Midday</td><td>Curated news based on your interests</td></tr>
+                        <tr><td><strong>End-of-Day Brief</strong></td><td>Evening</td><td>Summary of what was accomplished and what carries over</td></tr>
+                        <tr><td><strong>Memory Consolidation</strong></td><td>Nightly</td><td>Extracts insights into long-term memory</td></tr>
+                        <tr><td><strong>Semantic Re-indexing</strong></td><td>Weekly</td><td>Refreshes the vector database</td></tr>
+                    </tbody>
+                </table></div>
+            </section>
+
+            <section id="background">
+                <h2>What's Working in the Background</h2>
+                <div class="grid">
+                    <article><h3>Session Bridge</h3><p>When you approach token limits, Cal preserves active context so the next session can pick up where the work left off.</p></article>
+                    <article><h3>Session Recovery</h3><p>If something goes wrong mid-conversation, Cal detects it and recovers without throwing away useful context.</p></article>
+                    <article><h3>Startup Memory</h3><p>Cal can refresh a compact, ranked context file after consolidation so new sessions load the most useful current context.</p></article>
+                    <article><h3>Persistent Memory</h3><p>Daily logs, curated memory, keyword indexing, and semantic indexing turn usage into compounding context.</p></article>
+                </div>
+            </section>
+
+            <section id="apple">
+                <h2>Apple Integration</h2>
+                <p>Native access to local Apple apps. Your data stays on your Mac.</p>
+                <div class="table-wrap"><table>
+                    <thead>
+                        <tr><th>App</th><th>Read</th><th>Write</th><th>How</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>Calendar</strong></td><td>Yes</td><td>Yes</td><td>icalBuddy + Apple Shortcuts</td></tr>
+                        <tr><td><strong>Mail</strong></td><td>Yes</td><td>Optional</td><td>Local mail tooling</td></tr>
+                        <tr><td><strong>Notes</strong></td><td>Yes</td><td>Yes</td><td>AppleScript + memo CLI</td></tr>
+                        <tr><td><strong>Reminders</strong></td><td>Optional</td><td>Yes</td><td>Apple Shortcuts</td></tr>
+                    </tbody>
+                </table></div>
+            </section>
+        </main>
+
+        <aside class="toc-sidebar"></aside>
+    </div>
+
+    <footer class="container">
+        <p>Cal — your thinking partner. <a href="https://github.com/monbishnoi/cal">Star on GitHub</a></p>
+    </footer>
+
+    <script src="toc.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cal-pwa-v2';
+const CACHE_NAME = 'cal-pwa-v19';
 const APP_SHELL = [
   '/',
   '/manifest.json',

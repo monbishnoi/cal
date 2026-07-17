@@ -1,5 +1,11 @@
+node_modules/
 config/imessage.json
 config/.env.push
 config/tls.crt
 config/tls.key
 data/push-subscriptions.json
+config/.env
+config/jobs.json
+config/user.json
+context/STARTUP-MEMORY.md
+context/memory-topics.json

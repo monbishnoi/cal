@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture — Cal</title>
+    <meta name="description" content="How Cal's gateway, channels, tools, session manager, memory, and Claude API integration fit together.">
+    <meta property="og:title" content="Architecture — Cal">
+    <meta property="og:description" content="A local-first agent harness architecture for memory, action, and self-healing.">
+    <meta property="og:type" content="website">
+    <link rel="stylesheet" href="styles.css?v=public-1">
+</head>
+<body>
+    <nav>
+        <div class="container nav-container">
+            <strong><a href="index.html" class="nav-brand">Cal</a></strong>
+            <button class="nav-toggle" aria-label="Toggle navigation" onclick="this.classList.toggle('active'); document.querySelector('.nav-links').classList.toggle('open')">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-links">
+                <li><a href="getting-started.html">Get Started</a></li>
+                <li><a href="capabilities.html">Capabilities</a></li>
+                <li><a href="channels.html">Channels</a></li>
+                <li><a href="privacy.html">Privacy</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="page-layout">
+        <main class="page-content">
+            <header style="margin-bottom: 3rem;">
+                <h1>Architecture</h1>
+                <p style="font-size: 1.25rem; color: var(--text-secondary);">How Cal works under the hood.</p>
+            </header>
+
+            <section id="overview">
+                <h2>High-Level Overview</h2>
+                <pre style="font-size: 0.8rem; line-height: 1.4;"><code>┌─────────────────────────────────────────────────────────────────┐
+│                         YOUR MAC                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │ Terminal │  │ iMessage │  │  Web UI  │  │ Telegram │        │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘        │
+│       │             │             │             │                │
+│       └─────────────┴──────┬──────┴─────────────┘                │
+│                            │                                     │
+│                    ┌───────▼───────┐                             │
+│                    │  Cal Gateway  │                             │
+│                    │   (Node.js)   │                             │
+│                    └───────┬───────┘                             │
+│                            │                                     │
+│       ┌────────────────────┼────────────────────┐                │
+│       │                    │                    │                │
+│  ┌────▼────┐        ┌──────▼──────┐      ┌─────▼─────┐          │
+│  │  Tools  │        │   Session   │      │  Memory   │          │
+│  │ (local) │        │   Manager   │      │  (files)  │          │
+│  └─────────┘        └─────────────┘      └───────────┘          │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            │ HTTPS
+                            ▼
+                ┌───────────────────────┐
+                │     Claude API        │
+                │     (Anthropic)       │
+                └───────────────────────┘</code></pre>
+            </section>
+
+            <section id="components">
+                <h2>Core Components</h2>
+
+                <article>
+                    <h3>Cal Gateway</h3>
+                    <p>The central hub running on your Mac. A Node.js service that:</p>
+                    <ul>
+                        <li>Receives messages from all channels</li>
+                        <li>Routes model turns to Claude through your configured API endpoint</li>
+                        <li>Executes tool calls for calendar, mail, files, search, and local workflows</li>
+                        <li>Manages session state and memory</li>
+                        <li>Sends responses back to the originating channel</li>
+                    </ul>
+                </article>
+
+                <article>
+                    <h3>Session Manager</h3>
+                    <p>Maintains conversation context across channels and sessions:</p>
+                    <ul>
+                        <li><strong>Shared session:</strong> channels can share one conversation</li>
+                        <li><strong>Session Bridge:</strong> automatic context preservation at token limits</li>
+                        <li><strong>Session Recovery:</strong> graceful recovery from malformed or corrupted state</li>
+                    </ul>
+                </article>
+
+                <article>
+                    <h3>Memory System</h3>
+                    <p>Five-layer persistent memory:</p>
+                    <ul>
+                        <li><strong>Session memory:</strong> current conversation context</li>
+                        <li><strong>Daily logs:</strong> markdown files per day</li>
+                        <li><strong>Long-term memory:</strong> curated facts via consolidation</li>
+                        <li><strong>Keyword index:</strong> full-text search</li>
+                        <li><strong>Semantic memory:</strong> local vector database for meaning-based recall</li>
+                    </ul>
+                    <p>See <a href="capabilities.html#memory">Memory: The Five Layers</a> for the full picture.</p>
+                </article>
+            </section>
+
+            <section id="channels">
+                <h2>Channel Architecture</h2>
+                <article><h3>Terminal</h3><p>Direct invocation of Claude Code with Cal's instructions, memory, and local tool access.</p></article>
+                <article><h3>Web UI (PWA)</h3><p>HTTP server and WebSocket connection for real-time browser messaging.</p></article>
+                <article><h3>iMessage</h3><p>Local polling through <code>imsg</code> to read incoming messages and send responses through Messages.</p></article>
+                <article><h3>Telegram</h3><p>Bot adapter that forwards messages into the same Cal runtime and returns responses remotely.</p></article>
+            </section>
+
+            <section id="self-evolving">
+                <h2>Self-Evolving Capabilities</h2>
+                <article>
+                    <h3>Session Bridge</h3>
+                    <p>When approaching the context limit, Cal generates a handoff, writes active context, and starts fresh with that context loaded.</p>
+                </article>
+                <article>
+                    <h3>Startup Memory Refresh</h3>
+                    <p>Nightly consolidation can refresh a compact startup memory so new sessions begin with recent, high-signal context.</p>
+                </article>
+                <article>
+                    <h3>Memory Consolidation</h3>
+                    <p>Scheduled consolidation extracts durable facts, updates long-term memory, and refreshes search indexes.</p>
+                </article>
+            </section>
+
+            <section id="data-flow">
+                <h2>Data Flow Example</h2>
+                <p>When you send "What's on my calendar today?" via iMessage:</p>
+                <ol>
+                    <li><strong>iMessage channel</strong> detects a new message in the local Messages database</li>
+                    <li><strong>Cal Gateway</strong> receives the message</li>
+                    <li><strong>Session Manager</strong> adds it to conversation history</li>
+                    <li><strong>Gateway</strong> sends context and message to Claude through your configured API endpoint</li>
+                    <li><strong>Claude</strong> decides to call the calendar tool</li>
+                    <li><strong>Gateway</strong> executes the local calendar command and returns the result</li>
+                    <li><strong>Claude</strong> generates a human-readable response</li>
+                    <li><strong>Gateway</strong> sends the response back through iMessage</li>
+                </ol>
+            </section>
+
+            <section id="design-decisions">
+                <h2>Key Design Decisions</h2>
+                <div class="grid">
+                    <article><h3>Local-first</h3><p>Everything runs on your Mac. The model API is the main external dependency.</p></article>
+                    <article><h3>Shared context</h3><p>Channels share memory so the conversation follows you.</p></article>
+                    <article><h3>Plain files</h3><p>Memory is stored as markdown and JSON: readable, editable, deletable.</p></article>
+                    <article><h3>Continuity-first</h3><p>Session Bridge and startup-memory refresh preserve useful context across session boundaries.</p></article>
+                </div>
+            </section>
+        </main>
+
+        <aside class="toc-sidebar"></aside>
+    </div>
+
+    <footer class="container">
+        <p>Cal — your thinking partner. <a href="https://github.com/monbishnoi/cal">Star on GitHub</a></p>
+    </footer>
+
+    <script src="toc.js"></script>
+</body>
+</html>

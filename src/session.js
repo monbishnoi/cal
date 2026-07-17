@@ -12,21 +12,21 @@ import Anthropic from '@anthropic-ai/sdk';
 import { loadSystemPrompt, getCurrentTimeContext } from './context.js';
 import { getTools, executeToolCall } from './tools.js';
 import { saveSession, getSession } from './session-store.js';
-import { performInSessionHandoff } from './session-bridge.js';
+import { performInSessionHandoff, resetAndContinueAfterBridge } from './session-bridge.js';
 import { logError } from './logger.js';
-import { getLoopPilotGuidance } from './loop-pilot.js';
 
 // API Configuration
-const API_KEY = process.env.HYPERSPACE_PROXY_KEY || process.env.ANTHROPIC_API_KEY;
-const BASE_URL = process.env.HYPERSPACE_PROXY_URL || 'http://localhost:6655/anthropic';
-const MODEL = process.env.CAL_MODEL || 'anthropic--claude-4.6-opus';
+const API_KEY = process.env.ANTHROPIC_API_KEY || process.env.CAL_API_KEY;
+const BASE_URL = process.env.ANTHROPIC_BASE_URL || process.env.CAL_BASE_URL;
+const MODEL = process.env.CAL_MODEL || 'claude-sonnet-4-5-20250929';
 const MAX_OUTPUT_TOKENS = parsePositiveInt(process.env.CAL_MAX_OUTPUT_TOKENS, 12000);
 
-// Session Bridge: Context window limit (200K tokens for standard Opus)
-const CONTEXT_LIMIT = parseInt(process.env.CAL_CONTEXT_LIMIT) || 200000;
+// Session Bridge: Context window limit (1M tokens for Opus 4.8)
+const CONTEXT_LIMIT = parseInt(process.env.CAL_CONTEXT_LIMIT) || 1000000;
 const THRESHOLD_HANDOFF = 0.90;  // 90% - trigger in-session handoff, then reset
 const THRESHOLD_MID_TOOL_HANDOFF = 0.85;  // 85% - schedule early handoff after tool loops reach a safe point
 const MAX_MID_LOOP_RESETS = 3;  // Safety limit to prevent infinite handoff loops
+const TOOL_ERROR_MESSAGE_LIMIT = 200;
 
 export class CalSession {
   constructor(sessionId, options = {}) {
@@ -56,7 +56,7 @@ export class CalSession {
     // Initialize Anthropic client
     this.client = new Anthropic({
       apiKey: API_KEY,
-      baseURL: BASE_URL,
+      ...(BASE_URL ? { baseURL: BASE_URL } : {}),
     });
 
     this.model = MODEL;
@@ -251,6 +251,50 @@ export class CalSession {
     return next;
   }
 
+  async appendSilentTurns(turns, { channel = 'voice', voiceSessionId = null } = {}) {
+    const run = async () => {
+      const normalizedTurns = Array.isArray(turns) ? turns : [];
+      const existingSourceIds = new Set(this.messages
+        .filter(message => message?.channel === channel && message?.sourceId)
+        .map(message => message.sourceId));
+      let appended = 0;
+      let skipped = 0;
+
+      for (const turn of normalizedTurns) {
+        const role = turn?.role === 'assistant' ? 'assistant' : turn?.role === 'user' ? 'user' : null;
+        const text = typeof turn?.text === 'string' ? turn.text.trim() : '';
+        const sourceId = typeof turn?.sourceId === 'string' ? turn.sourceId.trim() : '';
+        if (!role || !text) {
+          skipped++;
+          continue;
+        }
+        if (sourceId && existingSourceIds.has(sourceId)) {
+          skipped++;
+          continue;
+        }
+
+        this.messages.push({
+          role,
+          content: role === 'assistant' ? [{ type: 'text', text }] : text,
+          channel,
+          voiceSessionId: voiceSessionId || null,
+          sourceId: sourceId || null,
+          recordedAt: turn?.recordedAt || new Date().toISOString(),
+        });
+        if (sourceId) existingSourceIds.add(sourceId);
+        appended++;
+      }
+
+      if (appended > 0) this.persistToDisk();
+      return { appended, skipped };
+    };
+
+    const previous = this.messageQueue.catch(() => {});
+    const next = previous.then(run);
+    this.messageQueue = next.catch(() => {});
+    return next;
+  }
+
   async _sendMessage(userMessage, options = {}) {
     const {
       onToolCall,
@@ -259,7 +303,10 @@ export class CalSession {
       maxIterations: customMaxIterations,
       isBackgroundJob,
       isHandoff,
+      displayUserMessage,
       attachments = [],
+      channel = null,
+      voiceSessionId = null,
     } = options;
 
     if (!this.isInitialized) {
@@ -283,27 +330,30 @@ export class CalSession {
       this.persistToDisk(); // Persist the repair immediately
     }
 
-    // Add timestamp context and optional Loop Pilot guidance.
+    // Add timestamp context.
     const timeContext = getCurrentTimeContext();
     const visibleUserMessage = userMessage?.trim() || 'Please inspect the attached image.';
-    const loopPilotGuidance = await getLoopPilotGuidance(userMessage, {
-      ...options,
-      sessionId: this.sessionId,
-      maxIterations: customMaxIterations || 10,
-    });
-    const messageContent = loopPilotGuidance
-      ? `${timeContext}\n\n${loopPilotGuidance}\n\n${visibleUserMessage}`
-      : `${timeContext}\n\n${visibleUserMessage}`;
+    const messageContent = `${timeContext}\n\n${visibleUserMessage}`;
     const attachmentDisplayText = buildAttachmentDisplayText(userMessage?.trim(), attachments);
+    const displayContent = typeof displayUserMessage === 'string' && displayUserMessage.trim()
+      ? `${timeContext}\n\n${displayUserMessage.trim()}`
+      : attachmentDisplayText
+        ? `${timeContext}\n\n${attachmentDisplayText}`
+      : null;
 
     // Add user message to history
     const userHistoryMessage = {
       role: 'user',
       content: buildUserMessageContent(messageContent, attachments),
     };
-    if (attachmentDisplayText) {
-      userHistoryMessage.displayContent = `${timeContext}\n\n${attachmentDisplayText}`;
+    if (attachments.length) {
+      userHistoryMessage.attachments = buildHistoryAttachmentMetadata(attachments);
     }
+    if (displayContent && displayContent !== messageContent) {
+      userHistoryMessage.displayContent = displayContent;
+    }
+    if (channel) userHistoryMessage.channel = channel;
+    if (voiceSessionId) userHistoryMessage.voiceSessionId = voiceSessionId;
     this.messages.push(userHistoryMessage);
 
     // Snapshot for rollback on failure
@@ -336,16 +386,25 @@ export class CalSession {
         const toolResults = [];
         for (const toolUse of toolUses) {
           console.log(`[Session ${this.sessionId}] Executing tool: ${toolUse.name}`);
+          const toolStartedAt = Date.now();
+          const toolMeta = {
+            toolUseId: toolUse.id,
+            iteration: iterations,
+            inputSummary: summarizeToolInput(toolUse.input),
+          };
 
           if (onToolCall) {
-            onToolCall(toolUse.name, toolUse.input);
+            onToolCall(toolUse.name, toolUse.input, toolMeta);
           }
 
           try {
             const result = await executeToolCall(toolUse.name, toolUse.input, { session: this });
 
             if (onToolResult) {
-              onToolResult(toolUse.name, false);
+              onToolResult(toolUse.name, false, {
+                ...toolMeta,
+                durationMs: Date.now() - toolStartedAt,
+              });
             }
 
             toolResults.push({
@@ -355,14 +414,20 @@ export class CalSession {
             });
           } catch (err) {
             console.error(`[Session ${this.sessionId}] Tool error:`, err.message);
+            const errorCategory = categorizeToolError(err);
+            const errorMessage = truncateErrorMessage(err.message);
 
             if (onToolResult) {
-              onToolResult(toolUse.name, true);
+              onToolResult(toolUse.name, true, {
+                ...toolMeta,
+                durationMs: Date.now() - toolStartedAt,
+                errorCategory,
+                errorMessage,
+              });
             }
 
             // Log tool errors with structured data
-            const isTimeout = err.message.includes('ETIMEDOUT') || err.message.includes('timed out');
-            if (isTimeout) {
+            if (errorCategory === 'timeout') {
               logError('tool_timeout', {
                 session: this.sessionId,
                 tool: toolUse.name,
@@ -501,14 +566,42 @@ export class CalSession {
 
           const toolResults = [];
           for (const toolUse of toolUses) {
+            console.log(`[Session ${this.sessionId}] Executing final tool after max iterations: ${toolUse.name}`);
+            const toolStartedAt = Date.now();
+            const toolMeta = {
+              toolUseId: toolUse.id,
+              iteration: maxIterations,
+              inputSummary: summarizeToolInput(toolUse.input),
+            };
+
+            if (onToolCall) {
+              onToolCall(toolUse.name, toolUse.input, toolMeta);
+            }
+
             try {
               const result = await executeToolCall(toolUse.name, toolUse.input, { session: this });
+              if (onToolResult) {
+                onToolResult(toolUse.name, false, {
+                  ...toolMeta,
+                  durationMs: Date.now() - toolStartedAt,
+                });
+              }
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
                 content: String(result || '(no output)'),
               });
             } catch (toolErr) {
+              const errorCategory = categorizeToolError(toolErr);
+              const errorMessage = truncateErrorMessage(toolErr.message);
+              if (onToolResult) {
+                onToolResult(toolUse.name, true, {
+                  ...toolMeta,
+                  durationMs: Date.now() - toolStartedAt,
+                  errorCategory,
+                  errorMessage,
+                });
+              }
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
@@ -575,10 +668,13 @@ export class CalSession {
         console.warn(`[Session ${this.sessionId}] Replaced incomplete final response (stop_reason=${response.stop_reason || 'unknown'})`);
       }
 
-      this.messages.push({
+      const finalAssistantMessage = {
         role: 'assistant',
         content: finalContent,
-      });
+      };
+      if (channel) finalAssistantMessage.channel = channel;
+      if (voiceSessionId) finalAssistantMessage.voiceSessionId = voiceSessionId;
+      this.messages.push(finalAssistantMessage);
 
       // Persist to disk
       this.persistToDisk();
@@ -592,12 +688,12 @@ export class CalSession {
         console.log(`[Session ${this.sessionId}] Safe point reached after tool loop, performing deferred handoff at ${usage.percentageFormatted}`);
 
         try {
-          await performInSessionHandoff(this, { internal: true });
+          const handoff = await performInSessionHandoff(this, { internal: true });
           this.midLoopResetCount++;
-          this.reset();
-          this.isInitialized = false;
-          await this.initialize();
-          finalText += '\n\n---\nSession saved and refreshed. Continuing...';
+          const continuation = await resetAndContinueAfterBridge(this, handoff.activeTask, { internal: true });
+          finalText += continuation.continued
+            ? `\n\n---\nSaving and continuing.\n\n${continuation.text}`
+            : '\n\n---\nSession saved.';
           console.log(`[Session ${this.sessionId}] Deferred handoff complete`);
         } catch (handoffErr) {
           console.error(`[Session ${this.sessionId}] Deferred handoff failed:`, handoffErr.message);
@@ -763,7 +859,7 @@ export class CalSession {
       model: this.model,
       max_tokens: MAX_OUTPUT_TOKENS,
       system: this.systemPrompt,
-      messages: this.messages,
+      messages: this.messages.map(({ role, content }) => ({ role, content })),
       tools: getTools(),
       stream: false,
     });
@@ -891,6 +987,34 @@ export class CalSession {
   }
 }
 
+function summarizeToolInput(input) {
+  if (input == null) return null;
+  if (typeof input === 'string') {
+    return {
+      kind: 'string',
+      charCount: input.length,
+      preview: input.slice(0, 50),
+    };
+  }
+  if (typeof input === 'object' && !Array.isArray(input)) {
+    const serialized = safeJson(input);
+    const command = typeof input.command === 'string' ? input.command : null;
+    return {
+      kind: 'object',
+      charCount: serialized.length,
+      preview: serialized.slice(0, 50),
+      commandLength: command ? command.length : undefined,
+      commandPreview: command ? command.slice(0, 50) : undefined,
+    };
+  }
+  const serialized = safeJson(input);
+  return {
+    kind: Array.isArray(input) ? 'array' : typeof input,
+    charCount: serialized.length,
+    preview: serialized.slice(0, 50),
+  };
+}
+
 function buildUserMessageContent(text, attachments = []) {
   if (!attachments.length) {
     return text;
@@ -918,6 +1042,15 @@ function buildAttachmentDisplayText(userMessage, attachments = []) {
     .join(', ');
   const suffix = names ? `\n\n[Attached image: ${names}]` : '\n\n[Attached image]';
   return `${userMessage || 'Image attached.'}${suffix}`;
+}
+
+function buildHistoryAttachmentMetadata(attachments = []) {
+  return attachments.map(attachment => ({
+    type: attachment.type || 'image',
+    mediaType: attachment.mediaType,
+    filename: attachment.filename || null,
+    size: attachment.size || null,
+  }));
 }
 
 function normalizeFinalAssistantContent(response, isBackgroundJob = false) {
@@ -957,6 +1090,46 @@ function buildIncompleteResponseText(stopReason, isBackgroundJob = false) {
   }
 
   return 'I finished processing, but the model returned no readable text. Please send that again, or say "continue" and I will pick it back up.';
+}
+
+function categorizeToolError(err) {
+  const message = String(err?.message || err || '').toLowerCase();
+  if (/\b(etimedout|timed out|timeout|request timed out)\b/.test(message)) return 'timeout';
+  if (/\b(enotfound|econnreset|econnrefused|ehostunreach|network|dns|socket hang up|fetch failed)\b/.test(message)) return 'network';
+  if (
+    message.includes('context_length') ||
+    message.includes('context window') ||
+    message.includes('too many tokens') ||
+    message.includes('request too large') ||
+    message.includes('maximum context length')
+  ) {
+    return 'context_exhaustion';
+  }
+  if (
+    message.includes('tool_use') ||
+    message.includes('tool_result') ||
+    message.includes('tool_use_id') ||
+    message.includes('orphaned')
+  ) {
+    return 'corruption';
+  }
+  if (/\b(exit code|enoent|eacces|eperm|permission denied|file not found|text not found|syntax error|command failed|spawn)\b/.test(message)) {
+    return 'command_error';
+  }
+  return 'unknown';
+}
+
+function truncateErrorMessage(message) {
+  const value = String(message || '');
+  return value.length <= TOOL_ERROR_MESSAGE_LIMIT ? value : value.slice(0, TOOL_ERROR_MESSAGE_LIMIT);
+}
+
+function safeJson(value) {
+  try {
+    return JSON.stringify(value) || String(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function parsePositiveInt(value, fallback) {

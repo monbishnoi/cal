@@ -11,6 +11,5 @@ Before publishing or deploying:
 - Use `telegram.chatId` to restrict the Telegram bot to one allowed chat.
 - Review enabled MCP servers before startup.
 - Avoid configuring MCP servers with credentials in `config/jobs.json`; prefer environment variables.
-- Keep Auto Heal review proposal-only until you have reviewed the commands, prompts, and write paths for your setup.
 
 The public distribution should only include examples and generic setup instructions.

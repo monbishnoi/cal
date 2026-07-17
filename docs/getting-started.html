@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Getting Started — Cal</title>
+    <meta name="description" content="Install and configure Cal, a local-first AI agent harness for macOS.">
+    <meta property="og:title" content="Getting Started — Cal">
+    <meta property="og:description" content="Clone Cal, add your API key, install local dependencies, and start the gateway.">
+    <meta property="og:type" content="website">
+    <link rel="stylesheet" href="styles.css?v=public-1">
+</head>
+<body>
+    <nav>
+        <div class="container nav-container">
+            <strong><a href="index.html" class="nav-brand">Cal</a></strong>
+            <button class="nav-toggle" aria-label="Toggle navigation" onclick="this.classList.toggle('active'); document.querySelector('.nav-links').classList.toggle('open')">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-links">
+                <li><a href="getting-started.html">Get Started</a></li>
+                <li><a href="capabilities.html">Capabilities</a></li>
+                <li><a href="channels.html">Channels</a></li>
+                <li><a href="privacy.html">Privacy</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="page-layout">
+        <main class="page-content">
+            <header style="margin-bottom: 3rem;">
+                <h1>Getting Started</h1>
+                <p class="subtitle" style="font-size: 1.25rem; color: var(--text-secondary);">Get Cal running locally.</p>
+            </header>
+
+            <section id="prerequisites">
+                <h2>Prerequisites</h2>
+                <ul>
+                    <li><strong>macOS</strong> (Sonoma or later recommended)</li>
+                    <li><strong>Node.js 18+</strong> (<code>brew install node</code>)</li>
+                    <li><strong>Anthropic API key</strong> or a compatible Claude API endpoint</li>
+                    <li><strong>Claude Code</strong> for terminal/developer workflows</li>
+                    <li><strong>Prevent Sleep App</strong> if you want Cal to stay responsive while your Mac is unattended</li>
+                </ul>
+            </section>
+
+            <section id="quick-start">
+                <h2>Quick Start</h2>
+
+                <article id="clone">
+                    <h3>1. Clone the Repository</h3>
+                    <pre><code>git clone https://github.com/monbishnoi/cal.git
+cd cal</code></pre>
+                </article>
+
+                <article id="install">
+                    <h3>2. Install Dependencies</h3>
+                    <pre><code>npm install</code></pre>
+                </article>
+
+                <article id="configure">
+                    <h3>3. Configure Environment</h3>
+                    <pre><code>cp config/env.example config/.env</code></pre>
+                    <p style="margin-top: 1rem;">Edit <code>config/.env</code>:</p>
+                    <pre><code># Required for Claude access
+ANTHROPIC_API_KEY=your-key-here
+
+# Optional: custom Claude-compatible endpoint
+# ANTHROPIC_BASE_URL=https://your-provider.example/anthropic
+
+# Optional: iMessage phone number
+# IMESSAGE_ALLOWED_PHONE=+1XXXXXXXXXX</code></pre>
+                </article>
+
+                <article id="system-deps">
+                    <h3>4. Install System Dependencies</h3>
+                    <pre><code># Calendar integration
+brew install ical-buddy
+
+# Notes integration
+brew tap antoniorodr/memo && brew install antoniorodr/memo/memo
+
+# iMessage integration (optional)
+brew install imsg</code></pre>
+                </article>
+
+                <article id="shortcuts">
+                    <h3>5. Set Up Apple Shortcuts</h3>
+                    <ol>
+                        <li>Open the <code>shortcuts/</code> folder in Finder</li>
+                        <li>Double-click each <code>.shortcut</code> file to import</li>
+                        <li>First run will prompt for Calendar or Reminders permission; select "Always Allow"</li>
+                    </ol>
+                </article>
+
+                <article id="google-workspace">
+                    <h3>6. Google Workspace MCP (Optional)</h3>
+                    <p>Enable this when you want Cal to work with Google Docs. Phase 1 supports Docs search, read, create, and confirmed non-destructive batch updates.</p>
+                    <pre><code>npm install -g @googleworkspace/cli
+gws auth login</code></pre>
+                    <p>Then enable the <code>google-workspace</code> MCP server in your local jobs config. Writes require a confirmation token, and delete/share/permission/ownership tools are not exposed.</p>
+                    <p><a href="capabilities.html#google-workspace">View the Google Workspace capability details →</a></p>
+                </article>
+
+                <article id="start">
+                    <h3>7. Start Cal Gateway</h3>
+                    <p><strong>Foreground (for testing):</strong></p>
+                    <pre><code>node src/gateway.js</code></pre>
+                    <p style="margin-top: 1rem;"><strong>With pm2:</strong></p>
+                    <pre><code>pm2 start src/gateway.js --name cal-gateway
+pm2 save</code></pre>
+                </article>
+
+                <article id="test">
+                    <h3>8. Test It</h3>
+                    <pre><code>cal
+> What's on my calendar today?</code></pre>
+                </article>
+            </section>
+
+            <section id="verify">
+                <h2>Verify Each Channel</h2>
+                <div class="table-wrap"><table>
+                    <thead>
+                        <tr><th>Channel</th><th>Test</th><th>Expected</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>Terminal</strong></td><td><code>cal</code></td><td>Response from Cal</td></tr>
+                        <tr><td><strong>Web UI</strong></td><td>URL shown at startup</td><td>Chat interface</td></tr>
+                        <tr><td><strong>iMessage</strong></td><td>Text Cal</td><td>Response in Messages</td></tr>
+                        <tr><td><strong>Telegram</strong></td><td>Message your configured bot</td><td>Response in Telegram</td></tr>
+                    </tbody>
+                </table></div>
+                <p>See <a href="channels.html">Channels</a> for detailed setup instructions.</p>
+            </section>
+
+            <section id="troubleshooting">
+                <h2>Troubleshooting</h2>
+
+                <details>
+                    <summary>Cal stops responding</summary>
+                    <p>Your Mac may have gone to sleep or the gateway may have stopped.</p>
+                    <pre><code>pmset -g log | grep -i sleep | tail -5
+pm2 status cal-gateway</code></pre>
+                    <p><strong>Solution:</strong> Keep the Mac awake for unattended access and restart the gateway if needed.</p>
+                </details>
+
+                <details>
+                    <summary>Gateway will not start</summary>
+                    <pre><code>tail -50 logs/gateway-error.log
+
+# Common issues:
+# - Missing ANTHROPIC_API_KEY
+# - CAL_HTTP_PORT already in use
+# - Missing node_modules</code></pre>
+                </details>
+
+                <details>
+                    <summary>Calendar or Notes not working</summary>
+                    <pre><code>/opt/homebrew/bin/icalBuddy eventsToday
+/opt/homebrew/bin/memo notes --no-cache</code></pre>
+                    <p>Check macOS privacy permissions for Terminal, Node, Shortcuts, Calendar, and Notes.</p>
+                </details>
+            </section>
+
+            <section id="next-steps">
+                <h2>Next Steps</h2>
+                <div class="grid">
+                    <article>
+                        <h3><a href="capabilities.html">Capabilities</a></h3>
+                        <p>Learn what Cal can do.</p>
+                    </article>
+                    <article>
+                        <h3><a href="channels.html">Channels</a></h3>
+                        <p>Set up additional channels.</p>
+                    </article>
+                    <article>
+                        <h3><a href="architecture.html">Architecture</a></h3>
+                        <p>Understand how Cal works.</p>
+                    </article>
+                </div>
+            </section>
+        </main>
+
+        <aside class="toc-sidebar"></aside>
+    </div>
+
+    <footer class="container">
+        <p>Cal — your thinking partner. <a href="https://github.com/monbishnoi/cal">Star on GitHub</a></p>
+    </footer>
+
+    <script src="toc.js"></script>
+</body>
+</html>

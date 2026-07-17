@@ -20,5 +20,6 @@
 | `imsg` | iMessage channel on macOS |
 | Brave Search API key | Web/news search |
 | QMD | Optional local semantic search |
+| Talkbox + OpenAI API key | Optional Realtime voice mode in the PWA |
 
 All optional integrations should be configured through `config/.env`, `config/user.json`, or `config/jobs.json`.

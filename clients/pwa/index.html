@@ -68,7 +68,7 @@
 
     #app {
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
+      grid-template-rows: minmax(0, 1fr);
       height: 100vh;
       height: 100dvh;
       background:
@@ -77,26 +77,103 @@
     }
 
     #app.has-strands {
-      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      grid-template-rows: minmax(0, 1fr);
     }
 
     .topbar {
-      position: relative;
-      z-index: 4;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 12;
       display: grid;
       grid-template-columns: 44px 1fr 44px;
       align-items: center;
       min-height: calc(56px + var(--safe-top));
       padding: var(--safe-top) calc(12px + var(--safe-right)) 0 calc(12px + var(--safe-left));
-      background: rgba(16, 16, 20, 0.84);
-      border-bottom: 1px solid var(--border);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
+      background:
+        linear-gradient(180deg, rgba(16, 16, 20, 0.52), rgba(16, 16, 20, 0.16)),
+        rgba(16, 16, 20, 0.18);
+      border-bottom: 1px solid rgba(244, 240, 234, 0.06);
+      box-shadow: 0 10px 34px rgba(0, 0, 0, 0.1);
+      backdrop-filter: blur(34px) saturate(190%);
+      -webkit-backdrop-filter: blur(34px) saturate(190%);
+    }
+
+    #app.has-strands .topbar {
+      background:
+        linear-gradient(180deg, rgba(16, 16, 20, 0.46), rgba(16, 16, 20, 0.12)),
+        rgba(16, 16, 20, 0.14);
+      border-bottom-color: transparent;
+      box-shadow: 0 6px 26px rgba(0, 0, 0, 0.06);
     }
 
     .brand {
+      position: relative;
+      z-index: 0;
       min-width: 0;
       text-align: center;
+    }
+
+    .brand::before {
+      content: "";
+      position: absolute;
+      top: -30px;
+      bottom: -24px;
+      left: 50%;
+      width: min(96vw, 520px);
+      z-index: -1;
+      border-radius: 999px;
+      background:
+        radial-gradient(ellipse at 28% 42%, rgba(88, 199, 165, 0.34), transparent 48%),
+        radial-gradient(ellipse at 70% 50%, rgba(214, 164, 95, 0.32), transparent 54%),
+        radial-gradient(ellipse at 50% 74%, rgba(255, 236, 194, 0.18), transparent 58%);
+      background-size: 170% 150%;
+      opacity: 0;
+      filter: blur(16px);
+      transform: translateX(-50%) scale(0.82);
+      transition: opacity 0.22s ease, transform 0.22s ease;
+      pointer-events: none;
+    }
+
+    .brand::after {
+      content: "";
+      position: absolute;
+      top: -16px;
+      bottom: -14px;
+      left: 50%;
+      width: min(70vw, 340px);
+      z-index: -1;
+      border-radius: 42% 58% 48% 52% / 56% 44% 56% 44%;
+      background:
+        linear-gradient(90deg, transparent, rgba(255, 238, 203, 0.3), rgba(88, 199, 165, 0.18), transparent);
+      opacity: 0;
+      filter: blur(18px);
+      transform: translateX(-50%) translateY(2px) scaleX(0.76);
+      transition: opacity 0.22s ease, transform 0.22s ease;
+      pointer-events: none;
+    }
+
+    .brand.voice-speaking::before {
+      opacity: 0.86;
+      transform: translateX(-50%) scale(1);
+      animation: voiceAurora 3.8s ease-in-out infinite;
+    }
+
+    .brand.voice-speaking::after {
+      opacity: 0.74;
+      transform: translateX(-50%) translateY(0) scaleX(1);
+      animation: voiceCurrent 2.6s ease-in-out infinite;
+    }
+
+    .brand.voice-speaking h1 {
+      text-shadow:
+        0 0 18px rgba(255, 238, 203, 0.52),
+        0 0 30px rgba(88, 199, 165, 0.22);
+    }
+
+    .brand.voice-speaking .status {
+      color: var(--text);
     }
 
     .brand h1 {
@@ -148,6 +225,39 @@
       }
     }
 
+    @keyframes voiceAurora {
+      0%, 100% {
+        background-position: 18% 50%;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.96);
+      }
+      35% {
+        background-position: 70% 38%;
+        border-radius: 46% 54% 58% 42% / 50% 42% 58% 50%;
+        transform: translateX(-50%) scale(1.06) translateY(1px);
+      }
+      70% {
+        background-position: 42% 72%;
+        border-radius: 58% 42% 46% 54% / 44% 56% 46% 54%;
+        transform: translateX(-50%) scale(1.02) translateY(-1px);
+      }
+    }
+
+    @keyframes voiceCurrent {
+      0%, 100% {
+        opacity: 0.32;
+        transform: translateX(-50%) translateY(1px) scaleX(0.84);
+      }
+      45% {
+        opacity: 0.78;
+        transform: translateX(-50%) translateY(-1px) scaleX(1.12);
+      }
+      75% {
+        opacity: 0.48;
+        transform: translateX(-50%) translateY(2px) scaleX(0.96);
+      }
+    }
+
     .icon-button {
       display: inline-flex;
       align-items: center;
@@ -171,18 +281,26 @@
     }
 
     .strand-tabs {
-      z-index: 3;
+      position: fixed;
+      top: calc(56px + var(--safe-top) - 5px);
+      left: 0;
+      right: 0;
+      z-index: 13;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 6px;
-      min-height: 42px;
-      padding: 6px calc(12px + var(--safe-right)) 6px calc(12px + var(--safe-left));
+      min-height: 40px;
+      padding: 0 calc(12px + var(--safe-right)) 10px calc(12px + var(--safe-left));
       overflow-x: auto;
-      background: rgba(16, 16, 20, 0.82);
-      border-bottom: 1px solid var(--border);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
+      background: transparent;
+      border-bottom: 0;
+      box-shadow: none;
+      pointer-events: none;
       scrollbar-width: none;
+    }
+
+    #app.has-strands .strand-tabs {
+      display: flex;
     }
 
     .strand-tabs[hidden] {
@@ -196,30 +314,75 @@
 
     .tabs-list {
       display: flex;
-      align-items: center;
-      gap: 6px;
+      align-items: flex-start;
+      gap: 4px;
       min-width: 0;
+      pointer-events: auto;
     }
 
     .session-tab {
       position: relative;
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       gap: 7px;
       min-width: 74px;
-      height: 30px;
-      padding: 0 8px;
-      border: 1px solid transparent;
-      border-radius: 8px;
-      background: transparent;
+      height: 28px;
+      padding: 1px 10px 0;
+      isolation: isolate;
+      border: 1px solid rgba(244, 240, 234, 0.13);
+      border-top-color: rgba(244, 240, 234, 0.18);
+      border-radius: 0 0 13px 13px;
+      background:
+        linear-gradient(180deg, rgba(16, 16, 20, 0.44), rgba(16, 16, 20, 0.12)),
+        rgba(16, 16, 20, 0.16);
       color: var(--muted);
+      opacity: 0.88;
+      transform: translateY(3px) scale(0.94);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.055),
+        0 10px 22px rgba(0, 0, 0, 0.09);
+      backdrop-filter: blur(30px) saturate(180%);
+      -webkit-backdrop-filter: blur(30px) saturate(180%);
+      transition: opacity 0.16s ease, transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
       white-space: nowrap;
     }
 
     .session-tab.active {
-      border-color: var(--border);
-      background: var(--surface);
+      z-index: 2;
+      height: 40px;
+      min-width: 98px;
+      padding-top: 4px;
+      border-color: rgba(244, 240, 234, 0.18);
+      border-top: 0;
+      border-radius: 0 0 18px 18px;
+      background:
+        linear-gradient(180deg, rgba(16, 16, 20, 0.46), rgba(16, 16, 20, 0.12)),
+        rgba(16, 16, 20, 0.14);
       color: var(--text);
+      opacity: 1;
+      transform: translateY(-8px) scale(1);
+      box-shadow:
+        inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+        0 0 0 1px rgba(214, 164, 95, 0.08),
+        0 14px 26px rgba(0, 0, 0, 0.12);
+      backdrop-filter: blur(34px) saturate(190%);
+      -webkit-backdrop-filter: blur(34px) saturate(190%);
+    }
+
+    .session-tab.active::before {
+      content: "";
+      position: absolute;
+      top: -10px;
+      left: -1px;
+      right: -1px;
+      height: 14px;
+      z-index: -1;
+      background:
+        linear-gradient(180deg, rgba(16, 16, 20, 0.46), rgba(16, 16, 20, 0.12)),
+        rgba(16, 16, 20, 0.14);
+      backdrop-filter: blur(34px) saturate(190%);
+      -webkit-backdrop-filter: blur(34px) saturate(190%);
     }
 
     .session-tab .tab-name {
@@ -227,7 +390,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
       font-size: 13px;
-      line-height: 1;
+      line-height: 1.15;
     }
 
     .tab-dot {
@@ -289,8 +452,14 @@
       overflow-y: auto;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      padding: 18px calc(14px + var(--safe-right)) 18px calc(14px + var(--safe-left));
-      scroll-padding-bottom: 24px;
+      padding: calc(72px + var(--safe-top)) calc(14px + var(--safe-right)) var(--composer-space, calc(112px + var(--safe-bottom))) calc(14px + var(--safe-left));
+      scroll-padding-top: calc(72px + var(--safe-top));
+      scroll-padding-bottom: var(--composer-space, calc(112px + var(--safe-bottom)));
+    }
+
+    #app.has-strands .messages {
+      padding-top: calc(104px + var(--safe-top));
+      scroll-padding-top: calc(104px + var(--safe-top));
     }
 
     .messages::-webkit-scrollbar {
@@ -551,29 +720,50 @@
     }
 
     .composer {
-      z-index: 5;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 12;
       padding: 10px calc(12px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(12px + var(--safe-left));
-      background: rgba(16, 16, 20, 0.9);
-      border-top: 1px solid var(--border);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
+      background: transparent;
+      border-top: 0;
+      pointer-events: none;
     }
 
     .composer-shell {
+      pointer-events: auto;
       display: grid;
-      grid-template-columns: 44px minmax(0, 1fr) 44px;
+      grid-template-columns: 40px minmax(0, 1fr) 40px;
+      grid-template-rows: minmax(44px, auto);
       align-items: end;
-      gap: 8px;
+      column-gap: 7px;
       max-width: 900px;
       margin: 0 auto;
+      min-height: 58px;
+      padding: 7px 8px;
+      border: 1px solid rgba(244, 240, 234, 0.13);
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.025)),
+        rgba(24, 25, 29, 0.62);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 18px 44px rgba(0, 0, 0, 0.24);
+      backdrop-filter: blur(26px) saturate(160%);
+      -webkit-backdrop-filter: blur(26px) saturate(160%);
     }
 
     .attach {
-      width: 44px;
-      height: 44px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--surface);
+      grid-column: 1;
+      grid-row: 1;
+      align-self: center;
+      justify-self: center;
+      width: 40px;
+      height: 40px;
+      border: 1px solid rgba(244, 240, 234, 0.1);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.035);
       color: var(--muted);
       display: inline-flex;
       align-items: center;
@@ -581,7 +771,7 @@
     }
 
     .attach:active {
-      background: var(--surface-2);
+      background: rgba(255, 255, 255, 0.09);
       color: var(--text);
     }
 
@@ -606,9 +796,9 @@
       align-items: center;
       gap: 10px;
       padding: 8px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: rgba(244, 240, 234, 0.05);
+      border: 1px solid rgba(244, 240, 234, 0.12);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.055);
     }
 
     .attachment-preview[hidden] {
@@ -673,12 +863,7 @@
     }
 
     .input-meta {
-      grid-column: 1 / -1;
-      min-height: 15px;
-      color: var(--subtle);
-      font-size: 11px;
-      line-height: 1.35;
-      text-align: right;
+      display: none;
     }
 
     .input-meta.warning {
@@ -686,24 +871,29 @@
     }
 
     textarea {
+      grid-column: 2;
+      grid-row: 1;
       width: 100%;
       max-height: 132px;
-      min-height: 44px;
+      min-height: 40px;
+      align-self: center;
+      overflow-y: auto;
       resize: none;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 11px 13px;
-      background: var(--surface);
+      border: 0;
+      border-radius: 18px;
+      padding: 9px 8px;
+      background: transparent;
       color: var(--text);
       caret-color: var(--accent);
       font-size: 16px;
       line-height: 1.35;
       outline: none;
+      opacity: 1;
+      transition: opacity 0.14s ease;
     }
 
     textarea:focus {
-      border-color: rgba(214, 164, 95, 0.72);
-      box-shadow: 0 0 0 3px rgba(214, 164, 95, 0.14);
+      box-shadow: none;
     }
 
     textarea::placeholder {
@@ -711,9 +901,13 @@
     }
 
     .send {
-      width: 44px;
-      height: 44px;
-      border-radius: 8px;
+      grid-column: 3;
+      grid-row: 1;
+      justify-self: end;
+      align-self: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 16px;
       background: var(--accent);
       color: #14110d;
       display: inline-flex;
@@ -731,9 +925,111 @@
       cursor: default;
     }
 
+    .send.voice-active {
+      background: rgba(255, 255, 255, 0.055);
+      color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(214, 164, 95, 0.42), 0 0 18px rgba(214, 164, 95, 0.22);
+    }
+
     .send svg {
       width: 21px;
       height: 21px;
+    }
+
+    .voice-waveform {
+      grid-column: 2;
+      grid-row: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      align-self: center;
+      gap: 5px;
+      height: 40px;
+      padding: 0;
+      margin: 0 auto;
+      width: min(230px, 62vw);
+      max-width: 100%;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .voice-waveform[hidden] {
+      display: none;
+    }
+
+    .voice-waveform span {
+      flex: 0 0 4px;
+      width: 4px;
+      max-width: 4px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      opacity: 0.62;
+      transform-origin: center;
+      transition: height 0.08s linear, opacity 0.08s linear;
+    }
+
+    .voice-waveform.idle span,
+    .voice-waveform.thinking span {
+      opacity: 0.45;
+    }
+
+    .voice-waveform.thinking span {
+      animation: voiceWaitingPulse 1.4s ease-in-out infinite;
+    }
+
+    .voice-waveform.thinking span:nth-child(2n) {
+      animation-delay: 0.12s;
+    }
+
+    .voice-waveform.thinking span:nth-child(3n) {
+      animation-delay: 0.24s;
+    }
+
+    .voice-waveform.thinking span:nth-child(4n) {
+      animation-delay: 0.36s;
+    }
+
+    @keyframes voiceWaitingPulse {
+      0%, 100% {
+        transform: scaleY(0.72);
+        opacity: 0.34;
+      }
+      45% {
+        transform: scaleY(1.36);
+        opacity: 0.62;
+      }
+    }
+
+    .composer.voice-mode textarea {
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .composer.voice-mode .attach {
+      grid-column: 1;
+      grid-row: 1;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .composer.voice-mode .voice-waveform {
+      grid-column: 2;
+      grid-row: 1;
+      display: flex;
+    }
+
+    .composer.voice-mode .send {
+      grid-column: 3;
+      grid-row: 1;
+      justify-self: end;
+    }
+
+    .composer.voice-mode .input-meta {
+      display: none;
     }
 
     .toast {
@@ -872,6 +1168,11 @@
             <path d="m22 2-7 20-4-9-9-4 20-7Z"></path>
           </svg>
         </button>
+        <div class="voice-waveform" id="voiceWaveform" hidden aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span>
+        </div>
         <div class="attachment-preview" id="attachmentPreview" hidden>
           <img id="attachmentThumb" alt="">
           <div>
@@ -886,7 +1187,9 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <audio id="voiceAudio" autoplay></audio>
 
+  <script src="/realtime-response-coordinator.js"></script>
   <script>
     const app = document.getElementById('app');
     const messagesEl = document.getElementById('messages');
@@ -909,6 +1212,14 @@
     const strandTabs = document.getElementById('strandTabs');
     const tabsList = document.getElementById('tabsList');
     const topAddStrandBtn = document.getElementById('topAddStrandBtn');
+    const brand = document.querySelector('.brand');
+    const voiceWaveform = document.getElementById('voiceWaveform');
+    const voiceBars = Array.from(voiceWaveform.querySelectorAll('span'));
+    const voiceAudio = document.getElementById('voiceAudio');
+
+    const SEND_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M22 2 11 13"></path><path d="m22 2-7 20-4-9-9-4 20-7Z"></path></svg>';
+    const MIC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><path d="M12 18v4"></path><path d="M8 22h8"></path></svg>';
+    const STOP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>';
 
     let toastTimer = null;
     let isProcessing = false;
@@ -919,10 +1230,60 @@
     const DEFAULT_SESSION_ID = '__default__';
     const MAX_INPUT_CHARS = 50000;
     const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+    const VOICE_NARRATION_MIN_GAP_MS = 4500;
+    const VOICE_BENCHMARK_STORAGE_KEY = 'calVoiceBenchmarks';
+    const VOICE_DISCONNECT_GRACE_MS = 30000;
+    const VOICE_RECONNECT_DELAY_MS = 1500;
+    const VOICE_MAX_RECONNECT_ATTEMPTS = 2;
+    const PWA_CLIENT_GENERATION = '2026-07-17-voice-setup-recovery-9';
     const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-    const TOKEN_ESTIMATE_CHARS = 4;
     let selectedImage = null;
     let selectedImageUrl = null;
+    let voicePeer = null;
+    let voiceChannel = null;
+    let voiceMicStream = null;
+    let voiceAudioContext = null;
+    let voiceMicAnalyser = null;
+    let voiceRemoteAnalyser = null;
+    let voiceMicRaf = null;
+    let voiceRemoteRaf = null;
+    let voiceMicWaveformRun = 0;
+    let voiceRemoteGlowRun = 0;
+    let voiceActive = false;
+    let voiceConnecting = false;
+    let voiceSpeaking = false;
+    let voiceSpeakingSince = 0;
+    let voiceInputSpeaking = false;
+    let voiceWaveformMode = 'idle';
+    let voiceBarsResetToken = 0;
+    let voiceAskInFlight = false;
+    let voiceTurnMetrics = null;
+    let voiceSessionMetrics = null;
+    let voiceBoundSessionId = null;
+    let voiceDisconnectTimer = null;
+    let voiceDisconnectedAt = null;
+    let voiceReconnectTimer = null;
+    let voiceReconnectAttempt = 0;
+    let voiceNarrationLastAt = 0;
+    let voiceHasGreeted = false;
+    let voiceRuntimeConfig = { userName: '' };
+    let queuedVoiceToolCalls = [];
+    const voiceNarratedStepKeys = new Set();
+    const pendingVoiceToolArgs = new Map();
+    const handledVoiceToolCalls = new Set();
+    const voiceTranscriptTurnsByInputId = new Map();
+    const voiceTranscriptTurnsByResponseId = new Map();
+    let activeVoiceTranscriptTurn = null;
+    let voiceTranscriptTurnSequence = 0;
+    const recentVoiceUserMessages = [];
+    const recentVoiceAssistantMessages = [];
+    const voiceResponseCoordinator = createRealtimeResponseCoordinator({
+      sendEvent: event => sendVoiceEvent(event),
+      onLifecycle: (state, detail) => {
+        recordVoiceSessionEvent(`response_coordinator_${state}`, detail);
+        if (state === 'timeout') setStatus('busy', 'Voice recovering');
+      },
+    });
     input.maxLength = MAX_INPUT_CHARS;
 
     function getActiveSession() {
@@ -1168,7 +1529,10 @@
       ws.addEventListener('close', () => {
         console.log('[WS] Disconnected');
         ws = null;
-        if (!isProcessing) setStatus('error', 'Disconnected');
+        if (!isProcessing) {
+          setStatus('error', 'Disconnected');
+          refreshHttpConnectivityAfterWsClose();
+        }
         scheduleReconnect();
       });
 
@@ -1223,6 +1587,9 @@
           {
             const sessionId = msg.sessionId || activeSessionId;
             const view = getSessionView(sessionId);
+            if (voiceAskInFlight && (!msg.sessionId || msg.sessionId === voiceBoundSessionId)) {
+              markVoiceMetric('calRunStarted', { runId: msg.runId || null });
+            }
             clearPendingResponse(sessionId);
 
             if (msg.sessionId && sessions.has(msg.sessionId)) {
@@ -1245,6 +1612,8 @@
         case 'step_started':
           {
             const view = getSessionView(msg.sessionId || activeSessionId);
+            addVoiceActivityMetric('step_started', msg);
+            maybeNarrateVoiceStep(msg);
             if (view.activityFeed) {
               const step = document.createElement('div');
               step.className = 'activity-step active';
@@ -1259,6 +1628,7 @@
         case 'step_finished':
           {
             const view = getSessionView(msg.sessionId || activeSessionId);
+            addVoiceActivityMetric('step_finished', msg);
             if (view.activityFeed) {
               const activeStep = view.activityFeed.querySelector(`.activity-step.active[data-tool="${msg.tool}"]`);
               if (activeStep) {
@@ -1273,8 +1643,12 @@
         case 'text_done':
           {
             const sessionId = msg.sessionId || activeSessionId;
+            const fullText = msg.fullText || 'No response';
+            if (voiceAskInFlight && (!msg.sessionId || msg.sessionId === voiceBoundSessionId)) {
+              markVoiceMetric('pwaTextDone', { runId: msg.runId || null, charCount: fullText.length });
+            }
             clearPendingResponse(sessionId);
-            addMessage(msg.fullText || 'No response', 'assistant', { sessionId });
+            addAssistantMessageOnce(fullText, sessionId, { rememberVoice: true });
             if (!msg.sessionId || msg.sessionId === activeSessionId) {
               isProcessing = false;
               setStatus('online', 'Ready');
@@ -1399,7 +1773,11 @@
           }
           dividerInserted = true;
         }
-        addMessage(message.content, message.role, { preReset: message.preReset, sessionId });
+        addMessage(message.content, message.role, {
+          preReset: message.preReset,
+          sessionId,
+          attachments: message.attachments || [],
+        });
       }
       const visibleCount = (data.messages || []).length;
       if (!data.sessionId || data.sessionId === activeSessionId) {
@@ -1412,7 +1790,14 @@
       const text = input.value.trim();
       const image = selectedImage;
       const imageUrl = selectedImageUrl;
-      if (!text && !image) return;
+      if (voiceActive || voiceConnecting) {
+        stopVoiceSession();
+        return;
+      }
+      if (!text && !image) {
+        toggleVoiceSession();
+        return;
+      }
       const targetSessionId = activeSessionId;
 
       if (multiSessionEnabled && (!activeSessionId || !sessions.has(activeSessionId))) {
@@ -1482,27 +1867,32 @@
           };
         };
 
+        const sendTargets = [];
         if (multiSessionEnabled && targetSessionId) {
-          response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(targetSessionId)}/message`), {
-            method: 'POST',
-            ...buildRequest(),
-          });
-        } else {
-          response = await fetch(apiUrl('/api/chat/send'), {
-            method: 'POST',
-            ...buildRequest(),
-          });
-          if (!image && response.status === 404) {
-            response = await fetch(apiUrl('/'), {
+          sendTargets.push(`/api/sessions/${encodeURIComponent(targetSessionId)}/message`);
+        }
+        sendTargets.push('/api/chat/send');
+        if (!image) sendTargets.push('/');
+
+        let lastError = null;
+        for (const target of sendTargets) {
+          try {
+            response = await fetch(apiUrl(target), {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body: JSON.stringify({ message: text }),
+              ...buildRequest(),
+              cache: 'no-store',
             });
+            if (response.status !== 404) break;
+            lastError = new Error(`Route not found: ${target}`);
+          } catch (error) {
+            lastError = error;
+            response = null;
           }
         }
+        if (!response) throw lastError || new Error('Could not reach Cal');
         const data = await readJsonResponse(response, 'Could not send message');
         loading.remove();
-        addMessage(data.message || 'No response', 'assistant', { sessionId: targetSessionId });
+        addAssistantMessageOnce(data.message || 'No response', targetSessionId);
         if (!targetSessionId || targetSessionId === activeSessionId) setStatus('online', 'Ready');
       } catch (error) {
         loading.remove();
@@ -1521,10 +1911,26 @@
       }
     }
 
+    async function refreshHttpConnectivityAfterWsClose() {
+      try {
+        const response = await fetch(apiUrl('/api/sessions'), {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        applySessions(data.sessions || []);
+        updateActiveStatus();
+      } catch {
+        // Keep the disconnected status when both WebSocket and HTTP are unavailable.
+      }
+    }
+
     async function loadSessions() {
       try {
         const response = await fetch(apiUrl('/api/sessions'), {
           headers: { Accept: 'application/json' },
+          cache: 'no-store',
         });
         if (!response.ok) return;
         const data = await response.json();
@@ -1557,7 +1963,6 @@
     async function closeSession(sessionId) {
       const session = sessions.get(sessionId);
       if (!session || session.permanent) return;
-      if (!window.confirm(`Close ${session.name}?`)) return;
 
       try {
         const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(sessionId)}`), {
@@ -1766,6 +2171,1337 @@
       return API_ORIGIN + path;
     }
 
+    function isVoiceModeAvailable() {
+      return input.value.trim().length === 0 && !selectedImage;
+    }
+
+    function updateComposerAction() {
+      const textMode = !isVoiceModeAvailable();
+      const voiceMode = voiceActive || voiceConnecting;
+      composer.classList.toggle('voice-mode', voiceMode);
+      attachBtn.disabled = voiceMode || isProcessing;
+      if (voiceMode) {
+        sendBtn.innerHTML = STOP_ICON;
+        sendBtn.disabled = false;
+        sendBtn.classList.add('voice-active');
+        sendBtn.setAttribute('aria-label', 'Stop voice');
+        sendBtn.title = 'Stop voice';
+        updateComposerSpace();
+        return;
+      }
+
+      sendBtn.classList.remove('voice-active');
+      if (textMode) {
+        sendBtn.innerHTML = SEND_ICON;
+        sendBtn.disabled = input.value.trim().length === 0 && !selectedImage;
+        sendBtn.setAttribute('aria-label', 'Send message');
+        sendBtn.title = 'Send message';
+      } else {
+        sendBtn.innerHTML = MIC_ICON;
+        sendBtn.disabled = false;
+        sendBtn.setAttribute('aria-label', 'Start voice');
+        sendBtn.title = 'Start voice';
+      }
+      updateComposerSpace();
+    }
+
+    function updateComposerSpace() {
+      requestAnimationFrame(() => {
+        const height = Math.ceil(composer.getBoundingClientRect().height + 14);
+        document.documentElement.style.setProperty('--composer-space', `${height}px`);
+      });
+    }
+
+    function normalizeMessageText(text) {
+      return String(text || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function rememberRecent(list, text, sessionId = activeSessionId) {
+      const normalized = normalizeMessageText(text);
+      if (!normalized) return;
+      list.push({ text: normalized, sessionId: viewIdFor(sessionId), at: Date.now() });
+      while (list.length > 8) list.shift();
+    }
+
+    function wasRecentlyAdded(list, text, sessionId = activeSessionId, windowMs = 20000) {
+      const normalized = normalizeMessageText(text);
+      if (!normalized) return false;
+      const viewId = viewIdFor(sessionId);
+      const now = Date.now();
+      return list.some(item => item.text === normalized && item.sessionId === viewId && now - item.at < windowMs);
+    }
+
+    function hasVisibleMessage(role, text, sessionId = activeSessionId) {
+      const normalized = normalizeMessageText(text);
+      if (!normalized) return false;
+      const views = [
+        sessionViews.get(viewIdFor(sessionId)),
+        sessionViews.get(viewIdFor(activeSessionId)),
+      ].filter(Boolean);
+      const uniqueViews = [...new Set(views)];
+      return uniqueViews.some(view => {
+        const messages = Array.from(view.container.querySelectorAll(`.message.${role}:not(.pending) .bubble`)).slice(-8);
+        return messages.some(node => normalizeMessageText(node.textContent) === normalized);
+      });
+    }
+
+    function addAssistantMessageOnce(text, sessionId = activeSessionId, options = {}) {
+      const normalized = normalizeMessageText(text);
+      if (!normalized) return null;
+      const recentlyAdded = wasRecentlyAdded(recentVoiceAssistantMessages, normalized, sessionId);
+      const alreadyVisible = hasVisibleMessage('assistant', normalized, sessionId);
+      if (options.rememberVoice) rememberRecent(recentVoiceAssistantMessages, normalized, sessionId);
+      if (recentlyAdded || alreadyVisible) return null;
+      const row = addMessage(text, 'assistant', { sessionId });
+      if (!options.rememberVoice) rememberRecent(recentVoiceAssistantMessages, normalized, sessionId);
+      return row;
+    }
+
+    function addVoiceUserMessage(text, sessionId = activeSessionId) {
+      const normalized = normalizeMessageText(text);
+      if (!normalized || wasRecentlyAdded(recentVoiceUserMessages, normalized, sessionId) || hasVisibleMessage('user', normalized, sessionId)) return;
+      addMessage(normalized, 'user', { sessionId });
+      rememberRecent(recentVoiceUserMessages, normalized, sessionId);
+    }
+
+    function addVoiceAssistantMessage(text, sessionId = activeSessionId) {
+      addAssistantMessageOnce(text, sessionId, { rememberVoice: true });
+    }
+
+    function setVoiceSpeaking(isSpeaking) {
+      voiceSpeaking = isSpeaking;
+      if (isSpeaking) voiceSpeakingSince = Date.now();
+      brand.classList.toggle('voice-speaking', isSpeaking);
+    }
+
+    function startVoiceTurnMetrics(reason = 'voice') {
+      voiceTurnMetrics = {
+        id: `voice-${Date.now().toString(36)}`,
+        kind: 'turn',
+        voiceSessionId: voiceSessionMetrics?.id || null,
+        reason,
+        sessionId: voiceBoundSessionId,
+        wallStartedAt: new Date().toISOString(),
+        startedAt: performance.now(),
+        marks: {},
+        activities: [],
+      };
+      voiceNarratedStepKeys.clear();
+      voiceNarrationLastAt = 0;
+      return voiceTurnMetrics;
+    }
+
+    function ensureVoiceTurnMetrics(reason = 'voice') {
+      return voiceTurnMetrics || startVoiceTurnMetrics(reason);
+    }
+
+    function markVoiceMetric(name, extra = {}) {
+      const metrics = ensureVoiceTurnMetrics(name);
+      if (!metrics.marks[name]) {
+        metrics.marks[name] = { at: performance.now() - metrics.startedAt, ...extra };
+      } else {
+        metrics.marks[name] = { ...metrics.marks[name], ...extra };
+      }
+      return metrics;
+    }
+
+    function addVoiceActivityMetric(kind, msg = {}) {
+      if (!voiceTurnMetrics || !voiceAskInFlight) return;
+      const sessionId = msg.sessionId || voiceBoundSessionId;
+      if (sessionId && voiceBoundSessionId && sessionId !== voiceBoundSessionId) return;
+      voiceTurnMetrics.activities.push({
+        kind,
+        at: Math.round(performance.now() - voiceTurnMetrics.startedAt),
+        runId: msg.runId || null,
+        tool: msg.tool || null,
+        description: msg.description || msg.tool || '',
+        inputSummary: msg.inputSummary || null,
+        durationMs: Number.isFinite(msg.durationMs) ? msg.durationMs : null,
+        isError: !!msg.isError,
+      });
+    }
+
+    function readStoredVoiceBenchmarks() {
+      try {
+        return JSON.parse(localStorage.getItem(VOICE_BENCHMARK_STORAGE_KEY) || '[]');
+      } catch {
+        return [];
+      }
+    }
+
+    function saveVoiceBenchmark(reason = 'updated') {
+      if (!voiceTurnMetrics) return;
+      const metrics = {
+        ...voiceTurnMetrics,
+        reason,
+        savedAt: new Date().toISOString(),
+        totalMs: Math.round(performance.now() - voiceTurnMetrics.startedAt),
+      };
+      const history = readStoredVoiceBenchmarks()
+        .filter(item => item.id !== metrics.id)
+        .concat(metrics)
+        .slice(-25);
+      try {
+        localStorage.setItem(VOICE_BENCHMARK_STORAGE_KEY, JSON.stringify(history));
+      } catch {}
+
+      const marks = metrics.marks || {};
+      const speechToAskMs = marks.askAgentFetchStart && marks.speechStopped
+        ? Math.round(marks.askAgentFetchStart.at - marks.speechStopped.at)
+        : null;
+      const calMs = marks.askAgentFetchEnd && marks.askAgentFetchStart
+        ? Math.round(marks.askAgentFetchEnd.at - marks.askAgentFetchStart.at)
+        : null;
+      const answerToAudioMs = marks.firstAudioDelta && marks.askAgentFetchEnd
+        ? Math.round(marks.firstAudioDelta.at - marks.askAgentFetchEnd.at)
+        : null;
+      const summary = {
+        totalMs: metrics.totalMs,
+        speechToAskMs,
+        calMs,
+        answerToAudioMs,
+        toolEvents: metrics.activities.length,
+        reason,
+      };
+      console.info('[Cal Voice Benchmark]', summary, metrics);
+      fetch(apiUrl('/voice/benchmarks'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(metrics),
+      }).catch(() => {});
+    }
+
+    function voiceConnectionSnapshot(peer = voicePeer, channel = voiceChannel) {
+      return {
+        connectionState: peer?.connectionState || null,
+        iceConnectionState: peer?.iceConnectionState || null,
+        iceGatheringState: peer?.iceGatheringState || null,
+        signalingState: peer?.signalingState || null,
+        channelState: channel?.readyState || null,
+        microphoneState: voiceMicStream?.getAudioTracks?.()[0]?.readyState || null,
+        voiceActive,
+        voiceConnecting,
+        voiceInputSpeaking,
+        voiceAskInFlight,
+        visibilityState: document.visibilityState,
+        online: navigator.onLine,
+      };
+    }
+
+    function startVoiceSessionMetrics() {
+      voiceSessionMetrics = {
+        id: `voice-session-${Date.now().toString(36)}`,
+        kind: 'session_lifecycle',
+        sessionId: voiceBoundSessionId,
+        wallStartedAt: new Date().toISOString(),
+        startedAt: performance.now(),
+        events: [],
+      };
+      recordVoiceSessionEvent('session_start');
+      return voiceSessionMetrics;
+    }
+
+    function recordVoiceSessionEvent(name, detail = {}, peer = voicePeer, channel = voiceChannel) {
+      if (!voiceSessionMetrics) return;
+      voiceSessionMetrics.events.push({
+        name,
+        at: Math.round(performance.now() - voiceSessionMetrics.startedAt),
+        wallAt: new Date().toISOString(),
+        ...voiceConnectionSnapshot(peer, channel),
+        ...detail,
+      });
+      if (voiceSessionMetrics.events.length > 80) voiceSessionMetrics.events.shift();
+    }
+
+    async function recordVoiceTransportStats(name, peer = voicePeer, channel = voiceChannel) {
+      if (!voiceSessionMetrics || !peer) return;
+      try {
+        const reports = await peer.getStats();
+        let pair = null;
+        let transport = null;
+        const audio = [];
+        for (const report of reports.values()) {
+          if (report.type === 'transport') transport = report;
+          if (
+            report.type === 'candidate-pair'
+            && report.state === 'succeeded'
+            && (report.nominated || report.selected)
+          ) {
+            pair = report;
+          }
+          if (
+            (report.type === 'inbound-rtp' || report.type === 'outbound-rtp')
+            && report.kind === 'audio'
+          ) {
+            audio.push({
+              direction: report.type === 'inbound-rtp' ? 'inbound' : 'outbound',
+              bytes: report.type === 'inbound-rtp' ? report.bytesReceived : report.bytesSent,
+              packets: report.type === 'inbound-rtp' ? report.packetsReceived : report.packetsSent,
+              packetsLost: report.packetsLost ?? null,
+              jitter: report.jitter ?? null,
+            });
+          }
+        }
+        if (transport?.selectedCandidatePairId) {
+          pair = reports.get(transport.selectedCandidatePairId) || pair;
+        }
+        const local = pair?.localCandidateId ? reports.get(pair.localCandidateId) : null;
+        const remote = pair?.remoteCandidateId ? reports.get(pair.remoteCandidateId) : null;
+        recordVoiceSessionEvent(name, {
+          transport: {
+            pairState: pair?.state || null,
+            nominated: pair?.nominated ?? null,
+            currentRoundTripTime: pair?.currentRoundTripTime ?? null,
+            availableOutgoingBitrate: pair?.availableOutgoingBitrate ?? null,
+            bytesSent: pair?.bytesSent ?? null,
+            bytesReceived: pair?.bytesReceived ?? null,
+            localCandidateType: local?.candidateType || null,
+            localProtocol: local?.protocol || null,
+            localNetworkType: local?.networkType || null,
+            localRelayProtocol: local?.relayProtocol || null,
+            remoteCandidateType: remote?.candidateType || null,
+            remoteProtocol: remote?.protocol || null,
+            audio,
+          },
+        }, peer, channel);
+      } catch (err) {
+        recordVoiceSessionEvent(`${name}_error`, {
+          errorName: err.name || null,
+          errorMessage: err.message || String(err),
+        }, peer, channel);
+      }
+    }
+
+    function classifyVoiceSessionClose(reason, snapshot, metrics) {
+      const categories = {
+        manual_stop: 'manual',
+        setup_error: 'setup_error',
+        microphone_track_ended: 'microphone_ended',
+        data_channel_closed: 'data_channel_closed',
+        peer_failed: 'transport_failure',
+        peer_disconnected: 'network_disconnect',
+        peer_disconnect_timeout: 'network_disconnect',
+        peer_closed: 'peer_closed',
+      };
+      const sawChannelError = metrics.events.some(event => event.name === 'data_channel_error');
+      const sawIceError = metrics.events.some(event => event.name === 'ice_candidate_error');
+      const opened = metrics.events.some(event => event.name === 'data_channel_open');
+      let category = categories[reason] || 'unknown';
+      if (reason !== 'manual_stop' && sawChannelError) {
+        category = 'data_channel_error';
+      } else if (
+        sawIceError
+        && ['setup_error', 'peer_failed', 'peer_disconnected'].includes(reason)
+      ) {
+        category = 'ice_error';
+      }
+      return {
+        reason,
+        category,
+        phase: opened ? 'active' : 'connecting',
+        elapsedMs: Math.round(performance.now() - metrics.startedAt),
+        finalState: snapshot,
+      };
+    }
+
+    function persistVoiceSessionMetrics(reason, detail = {}, { final = true, useBeacon = false } = {}) {
+      if (!voiceSessionMetrics) return;
+      const metrics = voiceSessionMetrics;
+      recordVoiceSessionEvent(final ? 'session_closed' : 'session_snapshot', { reason, ...detail });
+      const snapshot = voiceConnectionSnapshot();
+      const payload = {
+        ...metrics,
+        reason,
+        savedAt: new Date().toISOString(),
+        totalMs: Math.round(performance.now() - metrics.startedAt),
+        final,
+        diagnosis: classifyVoiceSessionClose(reason, snapshot, metrics),
+      };
+      console.info('[Cal Voice Lifecycle]', payload.diagnosis, payload);
+      const body = JSON.stringify(payload);
+      if (useBeacon && navigator.sendBeacon) {
+        navigator.sendBeacon(apiUrl('/voice/benchmarks'), new Blob([body], { type: 'application/json' }));
+      } else {
+        fetch(apiUrl('/voice/benchmarks'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      }
+      if (final) voiceSessionMetrics = null;
+    }
+
+    async function requestVoiceProgressNarration(msg = {}) {
+      const recentActivities = (voiceTurnMetrics?.activities || [])
+        .filter(item => item.kind === 'step_started')
+        .slice(-3);
+
+      const response = await fetch(apiUrl('/voice/progress'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          event: msg,
+          recentActivities,
+          style: 'calm-commentator',
+        }),
+      });
+      return await readJsonResponse(response, 'Could not prepare voice progress narration');
+    }
+
+    async function maybeNarrateVoiceStep(msg = {}) {
+      if (!voiceActive || !voiceAskInFlight || !voiceChannel || voiceChannel.readyState !== 'open') return;
+      const sessionId = msg.sessionId || voiceBoundSessionId;
+      if (sessionId && voiceBoundSessionId && sessionId !== voiceBoundSessionId) return;
+      const key = `${msg.runId || ''}:${msg.tool || ''}:${msg.description || ''}`;
+      if (voiceNarratedStepKeys.has(key)) return;
+      const now = performance.now();
+      if (now - voiceNarrationLastAt < VOICE_NARRATION_MIN_GAP_MS) return;
+      try {
+        const narration = await requestVoiceProgressNarration(msg);
+        if (!narration?.shouldNarrate || !narration.instructions) return;
+        voiceNarratedStepKeys.add(key);
+        voiceNarrationLastAt = now;
+        voiceResponseCoordinator.request({
+          phase: 'progress',
+          callId: msg.runId || '',
+          waitForAudioStop: true,
+          response: {
+            instructions: narration.instructions,
+          },
+        });
+        markVoiceMetric('narrationStarted', {
+          activity: narration.activity?.description || msg.description || msg.tool || '',
+          source: 'talkbox',
+        });
+      } catch (err) {
+        console.warn('[Voice] narration failed:', err.message);
+      }
+    }
+
+    function getVoiceAudioContext() {
+      if (!voiceAudioContext) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) throw new Error('Web Audio is not supported in this browser.');
+        voiceAudioContext = new AudioContext();
+      }
+      if (voiceAudioContext.state === 'suspended') {
+        voiceAudioContext.resume().catch(() => {});
+      }
+      return voiceAudioContext;
+    }
+
+    function setVoiceWaveformMode(mode) {
+      voiceWaveformMode = mode;
+      voiceWaveform.classList.toggle('idle', mode === 'idle');
+      voiceWaveform.classList.toggle('thinking', mode === 'thinking');
+    }
+
+    function resetVoiceBars() {
+      voiceBarsResetToken += 1;
+      setVoiceWaveformMode('idle');
+      for (const bar of voiceBars) {
+        bar.style.height = '8px';
+        bar.style.opacity = '0.45';
+        bar.style.transform = '';
+      }
+    }
+
+    function settleVoiceBars(mode = 'idle') {
+      voiceInputSpeaking = false;
+      voiceBarsResetToken += 1;
+      setVoiceWaveformMode(mode);
+      for (const bar of voiceBars) {
+        bar.style.height = '8px';
+        bar.style.opacity = '0.45';
+        bar.style.transform = '';
+      }
+    }
+
+    function startMicWaveform(stream) {
+      const runId = voiceMicWaveformRun + 1;
+      voiceMicWaveformRun = runId;
+      voiceWaveform.hidden = false;
+      setVoiceWaveformMode('idle');
+      const context = getVoiceAudioContext();
+      const source = context.createMediaStreamSource(stream);
+      voiceMicAnalyser = context.createAnalyser();
+      voiceMicAnalyser.fftSize = 512;
+      source.connect(voiceMicAnalyser);
+      const data = new Uint8Array(voiceMicAnalyser.fftSize);
+      const smoothedHeights = new Array(voiceBars.length).fill(10);
+      const idleHeights = voiceBars.map((_, index) => (
+        Math.max(6, 8 + Math.round(Math.sin(index * 0.82) * 1.5 + Math.cos(index * 0.47) * 1.2))
+      ));
+      let phase = 0;
+      let quietFrames = 0;
+      let localResetToken = voiceBarsResetToken;
+
+      const draw = () => {
+        if (!voiceMicAnalyser || runId !== voiceMicWaveformRun) return;
+        if (localResetToken !== voiceBarsResetToken) {
+          for (let i = 0; i < smoothedHeights.length; i += 1) {
+            smoothedHeights[i] = idleHeights[i];
+          }
+          localResetToken = voiceBarsResetToken;
+        }
+        voiceMicAnalyser.getByteTimeDomainData(data);
+        const bucketSize = Math.max(1, Math.floor(data.length / voiceBars.length));
+        let totalSquares = 0;
+        for (const value of data) {
+          const centered = (value - 128) / 128;
+          totalSquares += centered * centered;
+        }
+        const overallRms = Math.sqrt(totalSquares / data.length);
+        const voiceSessionLive = voiceActive || voiceConnecting;
+        const modeScale = 1;
+        const isQuiet = !voiceSessionLive || overallRms < 0.018;
+        quietFrames = isQuiet ? quietFrames + 1 : 0;
+        phase += 0.22 + overallRms * 3.2;
+
+        for (let i = 0; i < voiceBars.length; i += 1) {
+          let sumSquares = 0;
+          let peak = 0;
+          for (let j = 0; j < bucketSize; j += 1) {
+            const centered = ((data[i * bucketSize + j] || 128) - 128) / 128;
+            const magnitude = Math.abs(centered);
+            sumSquares += centered * centered;
+            peak = Math.max(peak, magnitude);
+          }
+          const bucketRms = Math.sqrt(sumSquares / bucketSize);
+          const position = voiceBars.length <= 1 ? 0 : i / (voiceBars.length - 1);
+          const envelope = 0.72 + Math.sin(position * Math.PI) * 0.28;
+          const motion = 1
+            + Math.sin(phase + i * 0.92) * 0.2
+            + Math.cos(phase * 0.7 + i * 1.63) * 0.12;
+          const rawLevel = quietFrames > 4
+            ? 0
+            : Math.max(bucketRms * 11.5, peak * 4.2, overallRms * 2.8) * envelope * motion * modeScale;
+          const level = Math.min(1, Math.max(0, rawLevel));
+          const shapedLevel = Math.pow(level, 0.62);
+          const targetHeight = voiceSessionLive ? Math.max(8, Math.round(8 + shapedLevel * 32)) : idleHeights[i];
+          if (!voiceSessionLive) {
+            smoothedHeights[i] = targetHeight;
+          } else {
+            const isFalling = targetHeight < smoothedHeights[i];
+            const smoothing = isFalling ? 0.12 : (quietFrames > 4 ? 0.28 : 0.48);
+            smoothedHeights[i] = smoothedHeights[i] * smoothing + targetHeight * (1 - smoothing);
+          }
+          const height = Math.round(smoothedHeights[i]);
+          voiceBars[i].style.height = `${height}px`;
+          const restingOpacity = voiceWaveformMode === 'thinking' ? 0.52 : 0.62;
+          voiceBars[i].style.opacity = String(Math.max(restingOpacity, Math.min(1, restingOpacity + shapedLevel * 0.36)));
+        }
+        voiceMicRaf = requestAnimationFrame(draw);
+      };
+
+      draw();
+    }
+
+    function startRemoteGlow(stream) {
+      const runId = voiceRemoteGlowRun + 1;
+      voiceRemoteGlowRun = runId;
+      const context = getVoiceAudioContext();
+      const source = context.createMediaStreamSource(stream);
+      voiceRemoteAnalyser = context.createAnalyser();
+      voiceRemoteAnalyser.fftSize = 256;
+      source.connect(voiceRemoteAnalyser);
+      const data = new Uint8Array(voiceRemoteAnalyser.fftSize);
+
+      const draw = () => {
+        if (!voiceRemoteAnalyser || runId !== voiceRemoteGlowRun) return;
+        voiceRemoteAnalyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (const value of data) {
+          const centered = (value - 128) / 128;
+          sum += centered * centered;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        if (rms > 0.025) {
+          setVoiceSpeaking(true);
+        } else if (voiceSpeaking && Date.now() - voiceSpeakingSince > 550) {
+          setVoiceSpeaking(false);
+        }
+        voiceRemoteRaf = requestAnimationFrame(draw);
+      };
+
+      draw();
+    }
+
+    function waitForIceGatheringComplete(peer, timeoutMs = 2500) {
+      if (peer.iceGatheringState === 'complete') return Promise.resolve();
+      return new Promise(resolve => {
+        const timeout = window.setTimeout(resolve, timeoutMs);
+        const onStateChange = () => {
+          if (peer.iceGatheringState !== 'complete') return;
+          window.clearTimeout(timeout);
+          peer.removeEventListener('icegatheringstatechange', onStateChange);
+          resolve();
+        };
+        peer.addEventListener('icegatheringstatechange', onStateChange);
+      });
+    }
+
+    function withTimeout(promise, timeoutMs, message) {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error(message)), timeoutMs);
+        }),
+      ]);
+    }
+
+    function sendVoiceEvent(event) {
+      if (!voiceChannel || voiceChannel.readyState !== 'open') {
+        throw new Error('Voice data channel is not open');
+      }
+      voiceChannel.send(JSON.stringify(event));
+    }
+
+    async function loadVoiceRuntimeConfig() {
+      try {
+        const response = await fetch(apiUrl('/voice/config'), { cache: 'no-store' });
+        voiceRuntimeConfig = await readJsonResponse(response, 'Could not load voice configuration');
+      } catch {
+        voiceRuntimeConfig = { userName: '' };
+      }
+    }
+
+    function sendVoiceSessionOpenNudge() {
+      if (!voiceChannel || voiceChannel.readyState !== 'open' || voiceHasGreeted) return;
+      voiceHasGreeted = true;
+      createVoiceTranscriptTurn();
+      const userName = normalizeMessageText(voiceRuntimeConfig.userName);
+      voiceResponseCoordinator.request({
+        phase: 'session_open',
+        waitForAudioStop: true,
+        response: {
+          instructions: [
+            'This voice connection is just beginning.',
+            userName
+              ? `Say one brief, warm greeting that includes the user's name exactly once: ${userName}.`
+              : 'Say one brief, warm greeting.',
+            'This is the only session-opening greeting. Do not repeat the greeting or user name.',
+            'Keep it to one short sentence with no facts, answer, or second opener.',
+          ].join(' '),
+        },
+      });
+    }
+
+    function createVoiceTranscriptTurn() {
+      const turn = {
+        id: `voice-transcript-${Date.now().toString(36)}-${++voiceTranscriptTurnSequence}`,
+        sessionId: voiceBoundSessionId,
+        voiceSessionId: voiceSessionMetrics?.id || null,
+        usedAskAgent: false,
+        inputs: new Map(),
+        outputs: new Map(),
+        inputWaiters: [],
+        persisting: false,
+      };
+      activeVoiceTranscriptTurn = turn;
+      return turn;
+    }
+
+    function getVoiceTranscriptTurn(event = {}) {
+      return voiceTranscriptTurnsByResponseId.get(event.response_id || event.response?.id)
+        || voiceTranscriptTurnsByInputId.get(event.item_id)
+        || activeVoiceTranscriptTurn;
+    }
+
+    function rememberVoiceInputTranscript(event) {
+      const turn = getVoiceTranscriptTurn(event) || createVoiceTranscriptTurn();
+      const text = normalizeMessageText(event.transcript);
+      if (!text) return;
+      const sourceId = event.item_id || `${turn.id}-user`;
+      turn.inputs.set(sourceId, text);
+      for (const resolve of turn.inputWaiters.splice(0)) resolve();
+    }
+
+    function rememberVoiceOutputTranscript(event) {
+      const turn = getVoiceTranscriptTurn(event) || createVoiceTranscriptTurn();
+      const text = normalizeMessageText(event.transcript || event.text);
+      if (!text) return;
+      const sourceId = event.item_id || `${event.response_id || turn.id}-assistant-${event.content_index || 0}`;
+      turn.outputs.set(sourceId, text);
+    }
+
+    function responseTranscriptTurns(event, turn) {
+      const turns = [];
+      for (const output of event.response?.output || []) {
+        if (output?.type !== 'message' || output?.role !== 'assistant') continue;
+        const text = normalizeMessageText((output.content || [])
+          .map(part => part?.transcript || part?.text || '')
+          .filter(Boolean)
+          .join('\n'));
+        if (text) turns.push([output.id || `${event.response.id}-assistant-${turns.length}`, text]);
+      }
+      return turns;
+    }
+
+    async function persistCompletedVoiceTurn(event) {
+      const turn = getVoiceTranscriptTurn(event);
+      if (!turn || turn.persisting || turn.usedAskAgent || event.response?.status !== 'completed') return;
+      turn.persisting = true;
+
+      if (turn.inputs.size === 0) {
+        await new Promise(resolve => {
+          const timer = window.setTimeout(resolve, 2000);
+          turn.inputWaiters.push(() => {
+            window.clearTimeout(timer);
+            resolve();
+          });
+        });
+      }
+      if (turn.usedAskAgent) return;
+      if (turn.outputs.size === 0) {
+        for (const [sourceId, text] of responseTranscriptTurns(event, turn)) {
+          turn.outputs.set(sourceId, text);
+        }
+      }
+
+      const turns = [
+        ...Array.from(turn.inputs, ([sourceId, text]) => ({ role: 'user', text, sourceId })),
+        ...Array.from(turn.outputs, ([sourceId, text]) => ({ role: 'assistant', text, sourceId })),
+      ];
+      if (turns.length === 0 || !turn.sessionId) return;
+
+      try {
+        const response = await fetch(apiUrl('/voice/writeback'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            sessionId: turn.sessionId,
+            voiceSessionId: turn.voiceSessionId,
+            turns,
+          }),
+        });
+        const payload = await readJsonResponse(response, 'Could not save voice turn');
+        for (const savedTurn of turns) {
+          if (savedTurn.role === 'user') addVoiceUserMessage(savedTurn.text, turn.sessionId);
+          else addVoiceAssistantMessage(savedTurn.text, turn.sessionId);
+        }
+        markVoiceMetric('voiceWritebackCompleted', {
+          appended: payload.appended || 0,
+          skipped: payload.skipped || 0,
+        });
+      } catch (err) {
+        recordVoiceSessionEvent('voice_writeback_failed', { message: err.message });
+      }
+    }
+
+    async function runVoiceAskAgentTool(call) {
+      let args = {};
+      try {
+        args = JSON.parse(call.arguments || '{}');
+      } catch (err) {
+        throw new Error(`Incomplete voice tool arguments: ${err.message}`);
+      }
+
+      const request = String(args.request || '').trim();
+      const mode = String(args.mode || 'answer').trim();
+      if (!request) throw new Error('Incomplete voice tool arguments: missing request');
+
+      const sessionId = voiceBoundSessionId;
+      if (!sessionId) throw new Error('Voice is not bound to an active Cal session');
+      voiceAskInFlight = true;
+      markVoiceMetric('askAgentRequestReady', { mode, charCount: request.length });
+      addVoiceUserMessage(request, sessionId);
+      setStatus('busy', 'Voice checking');
+
+      markVoiceMetric('askAgentFetchStart');
+      const response = await fetch(apiUrl('/voice/ask-agent'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          request,
+          mode,
+          contextId: sessionId || 'cal-pwa-voice',
+          channel: 'voice',
+          voiceSessionId: voiceSessionMetrics?.id || null,
+        }),
+      });
+      const payload = await readJsonResponse(response, 'Could not reach Talkbox');
+      const agentText = payload.agentText || payload.calText || payload.message || '';
+      markVoiceMetric('askAgentFetchEnd', {
+        status: response.status,
+        agentElapsedMs: Number.isFinite(payload.elapsedMs) ? payload.elapsedMs : null,
+        charCount: agentText.length,
+      });
+      addVoiceAssistantMessage(agentText, sessionId);
+      markVoiceMetric('pwaVoiceAssistantRendered', { charCount: agentText.length });
+      saveVoiceBenchmark('agent-answer-rendered');
+      setStatus('online', voiceActive ? 'Voice ready' : 'Ready');
+      return payload;
+    }
+
+    async function handleVoiceFunctionCall(call) {
+      if (call.name !== 'ask_agent' && call.name !== 'ask_cal') return;
+      if (handledVoiceToolCalls.has(call.call_id)) return;
+      handledVoiceToolCalls.add(call.call_id);
+      const transcriptTurn = getVoiceTranscriptTurn(call);
+      if (transcriptTurn) transcriptTurn.usedAskAgent = true;
+      markVoiceMetric('askAgentToolCallStarted', { callId: call.call_id || null });
+      settleVoiceBars('thinking');
+
+      try {
+        const result = await runVoiceAskAgentTool(call);
+        voiceAskInFlight = false;
+        sendVoiceEvent({
+          type: 'conversation.item.create',
+          item: {
+            type: 'function_call_output',
+            call_id: call.call_id,
+            output: JSON.stringify(result),
+          },
+        });
+        voiceResponseCoordinator.request({
+          phase: 'answer',
+          callId: call.call_id,
+          response: {
+            instructions: 'Speak as Cal in first person. Use only the tool output for facts. The filler already opened this turn: do not add a greeting, acknowledgment, filler, bridge phrase, opener, or transition. Start directly with the first substantive new information. Do not say you are relaying to Cal, asking another brain, or talking to the agent. Mention that the full answer is visible in the chat only when helpful.',
+          },
+        });
+      } catch (err) {
+        markVoiceMetric('askAgentError', { message: err.message });
+        voiceAskInFlight = false;
+        saveVoiceBenchmark('agent-error');
+        sendVoiceEvent({
+          type: 'conversation.item.create',
+          item: {
+            type: 'function_call_output',
+            call_id: call.call_id,
+            output: JSON.stringify({ ok: false, error: err.message }),
+          },
+        });
+        voiceResponseCoordinator.request({
+          phase: 'error',
+          callId: call.call_id,
+          response: {
+            instructions: 'Speak as Cal in first person. Do not add a greeting, acknowledgment, filler, bridge phrase, opener, or transition. Say there is a voice pipe issue reaching the runtime, and ask the user to try again. Do not invent the answer.',
+          },
+        });
+      }
+    }
+
+    function queueVoiceFunctionCall(call) {
+      if (
+        handledVoiceToolCalls.has(call.call_id)
+        || queuedVoiceToolCalls.some(queued => queued.call_id === call.call_id)
+      ) return;
+      const transcriptTurn = getVoiceTranscriptTurn(call);
+      if (transcriptTurn) transcriptTurn.usedAskAgent = true;
+      queuedVoiceToolCalls.push(call);
+      voiceResponseCoordinator.requireActiveAudioStop(call.response_id);
+      markVoiceMetric('askAgentToolCallQueued', { callId: call.call_id || null });
+    }
+
+    async function drainQueuedVoiceFunctionCall() {
+      if (queuedVoiceToolCalls.length === 0) return false;
+      const call = queuedVoiceToolCalls.shift();
+      await handleVoiceFunctionCall(call);
+      return true;
+    }
+
+    async function handleVoiceEvent(event) {
+      if (event.type === 'session.created' || event.type === 'session.updated') {
+        recordVoiceSessionEvent(event.type.replace('.', '_'), {
+          realtimeSessionId: event.session?.id || null,
+          realtimeModel: event.session?.model || null,
+          realtimeVoice: event.session?.audio?.output?.voice || null,
+          maxOutputTokens: event.session?.max_output_tokens ?? null,
+        });
+        return;
+      }
+      if (event.type === 'error') {
+        voiceResponseCoordinator.handleError(event.error);
+        recordVoiceSessionEvent('realtime_error', {
+          errorType: event.error?.type || null,
+          errorCode: event.error?.code || null,
+          errorMessage: event.error?.message || null,
+          errorEventId: event.error?.event_id || null,
+        });
+        return;
+      }
+      if (event.type === 'input_audio_buffer.speech_started') {
+        createVoiceTranscriptTurn();
+        startVoiceTurnMetrics('speech');
+        markVoiceMetric('speechStarted');
+        voiceInputSpeaking = true;
+        setVoiceWaveformMode('listening');
+        setStatus('busy', 'Listening');
+        return;
+      }
+      if (event.type === 'input_audio_buffer.speech_stopped') {
+        if (event.item_id && activeVoiceTranscriptTurn) {
+          voiceTranscriptTurnsByInputId.set(event.item_id, activeVoiceTranscriptTurn);
+        }
+        markVoiceMetric('speechStopped');
+        voiceInputSpeaking = false;
+        setStatus('busy', 'Thinking');
+        settleVoiceBars('thinking');
+        return;
+      }
+      if (event.type === 'conversation.item.input_audio_transcription.completed') {
+        rememberVoiceInputTranscript(event);
+        return;
+      }
+      if (
+        event.type === 'response.output_audio_transcript.done'
+        || event.type === 'response.audio_transcript.done'
+        || event.type === 'response.output_text.done'
+      ) {
+        rememberVoiceOutputTranscript(event);
+        return;
+      }
+      if (event.type === 'response.created') {
+        voiceResponseCoordinator.handleResponseCreated(event.response);
+        if (event.response?.id && activeVoiceTranscriptTurn) {
+          voiceTranscriptTurnsByResponseId.set(event.response.id, activeVoiceTranscriptTurn);
+        }
+        return;
+      }
+      if (event.type === 'output_audio_buffer.stopped') {
+        voiceResponseCoordinator.handleAudioStopped(event.response_id);
+        return;
+      }
+      if (event.type === 'response.audio.delta' || event.type === 'response.output_audio.delta') {
+        markVoiceMetric('firstAudioDelta');
+        setVoiceSpeaking(true);
+        return;
+      }
+      if (
+        event.type === 'response.done'
+        || event.type === 'response.audio.done'
+        || event.type === 'response.output_audio.done'
+      ) {
+        if (event.type === 'response.done') {
+          voiceResponseCoordinator.handleResponseDone(event.response);
+          void persistCompletedVoiceTurn(event);
+          if (await drainQueuedVoiceFunctionCall()) return;
+        }
+        markVoiceMetric('responseDone', { eventType: event.type });
+        if (!voiceAskInFlight && voiceTurnMetrics?.marks?.askAgentFetchEnd) {
+          saveVoiceBenchmark('voice-response-done');
+        }
+        settleVoiceBars('idle');
+        if (voiceActive) setStatus('online', 'Voice ready');
+        return;
+      }
+      if (event.type === 'response.function_call_arguments.delta') {
+        pendingVoiceToolArgs.set(
+          event.call_id,
+          `${pendingVoiceToolArgs.get(event.call_id) || ''}${event.delta || ''}`,
+        );
+        return;
+      }
+      if (event.type === 'response.function_call_arguments.done') {
+        markVoiceMetric('askAgentArgumentsDone', { callId: event.call_id || null });
+        queueVoiceFunctionCall({
+          name: event.name,
+          call_id: event.call_id,
+          response_id: event.response_id,
+          arguments: event.arguments || pendingVoiceToolArgs.get(event.call_id) || '',
+        });
+        return;
+      }
+      if (event.type === 'response.output_item.done' && event.item?.type === 'function_call' && event.item.arguments) {
+        markVoiceMetric('askAgentArgumentsDone', { callId: event.item.call_id || null });
+        queueVoiceFunctionCall({
+          name: event.item.name,
+          call_id: event.item.call_id,
+          response_id: event.response_id,
+          arguments: event.item.arguments,
+        });
+      }
+    }
+
+    function cleanupVoiceSession({
+      restoreStatus = false,
+      reason = 'cleanup',
+      detail = {},
+      persistLifecycle = true,
+      preserveSessionState = false,
+    } = {}) {
+      if (persistLifecycle && voiceSessionMetrics) {
+        persistVoiceSessionMetrics(reason, detail);
+      }
+      if (voiceDisconnectTimer) clearTimeout(voiceDisconnectTimer);
+      voiceDisconnectTimer = null;
+      voiceDisconnectedAt = null;
+      if (voiceReconnectTimer) clearTimeout(voiceReconnectTimer);
+      voiceReconnectTimer = null;
+      voiceActive = false;
+      voiceConnecting = false;
+      if (voiceMicRaf) cancelAnimationFrame(voiceMicRaf);
+      if (voiceRemoteRaf) cancelAnimationFrame(voiceRemoteRaf);
+      voiceMicWaveformRun += 1;
+      voiceRemoteGlowRun += 1;
+      voiceMicRaf = null;
+      voiceRemoteRaf = null;
+      voiceMicAnalyser = null;
+      voiceRemoteAnalyser = null;
+      voiceInputSpeaking = false;
+      voiceAskInFlight = false;
+      resetVoiceBars();
+      voiceWaveform.hidden = true;
+      setVoiceSpeaking(false);
+
+      if (voiceChannel) {
+        const channel = voiceChannel;
+        voiceChannel = null;
+        try { channel.close(); } catch {}
+      }
+      if (voicePeer) {
+        const peer = voicePeer;
+        voicePeer = null;
+        try { peer.close(); } catch {}
+      }
+      if (voiceMicStream) {
+        for (const track of voiceMicStream.getTracks()) track.stop();
+        voiceMicStream = null;
+      }
+      voiceAudio.pause();
+      voiceAudio.removeAttribute('src');
+      voiceAudio.srcObject = null;
+      voiceResponseCoordinator.reset();
+      pendingVoiceToolArgs.clear();
+      handledVoiceToolCalls.clear();
+      queuedVoiceToolCalls = [];
+      voiceTranscriptTurnsByInputId.clear();
+      voiceTranscriptTurnsByResponseId.clear();
+      activeVoiceTranscriptTurn = null;
+      voiceNarratedStepKeys.clear();
+      if (!preserveSessionState) {
+        voiceHasGreeted = false;
+        voiceBoundSessionId = null;
+        voiceReconnectAttempt = 0;
+      }
+      updateComposerAction();
+      updateInputMeta();
+      updateComposerSpace();
+      if (restoreStatus) {
+        setStatus(isProcessing ? 'busy' : 'online', isProcessing ? 'Working' : 'Ready');
+      }
+    }
+
+    function stopVoiceSession() {
+      cleanupVoiceSession({ restoreStatus: true, reason: 'manual_stop' });
+      showToast('Voice stopped');
+    }
+
+    async function ensureCurrentPwaClient() {
+      try {
+        const response = await fetch(apiUrl(`/?cal-pwa-check=${Date.now()}`), { cache: 'no-store' });
+        if (!response.ok) return true;
+        const html = await response.text();
+        const latestGeneration = html.match(/const PWA_CLIENT_GENERATION = '([^']+)'/)?.[1];
+        if (!latestGeneration || latestGeneration === PWA_CLIENT_GENERATION) return true;
+
+        showToast('Updating Cal before voice starts...');
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.set('cal-pwa', latestGeneration);
+        setTimeout(() => window.location.replace(nextUrl.toString()), 250);
+        return false;
+      } catch {
+        return true;
+      }
+    }
+
+    function scheduleVoiceReconnect(reason, detail = {}) {
+      const sessionId = voiceBoundSessionId;
+      const nextAttempt = voiceReconnectAttempt + 1;
+      if (!sessionId || nextAttempt > VOICE_MAX_RECONNECT_ATTEMPTS) {
+        cleanupVoiceSession({ restoreStatus: true, reason, detail });
+        showToast('Voice connection lost. Tap the microphone to reconnect.');
+        return;
+      }
+
+      recordVoiceSessionEvent('voice_reconnect_scheduled', {
+        reason,
+        attempt: nextAttempt,
+        maxAttempts: VOICE_MAX_RECONNECT_ATTEMPTS,
+        delayMs: VOICE_RECONNECT_DELAY_MS,
+      });
+      cleanupVoiceSession({
+        reason,
+        detail,
+        preserveSessionState: true,
+      });
+      voiceReconnectAttempt = nextAttempt;
+      voiceConnecting = true;
+      setStatus('busy', `Reconnecting voice (${nextAttempt}/${VOICE_MAX_RECONNECT_ATTEMPTS})`);
+      updateComposerAction();
+      updateInputMeta();
+      voiceReconnectTimer = setTimeout(() => {
+        voiceReconnectTimer = null;
+        void startVoiceSession({
+          reconnect: true,
+          sessionId,
+          attempt: nextAttempt,
+        });
+      }, VOICE_RECONNECT_DELAY_MS);
+    }
+
+    async function startVoiceSession({
+      reconnect = false,
+      sessionId: requestedSessionId = null,
+      attempt = 0,
+    } = {}) {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        showToast('Microphone is not supported in this browser.');
+        return;
+      }
+      if (!await ensureCurrentPwaClient()) return;
+
+      const sessionId = requestedSessionId || activeSessionId;
+      if (!sessionId || !sessions.has(sessionId)) {
+        showToast('Open an active Cal session before starting voice.');
+        return;
+      }
+
+      cleanupVoiceSession({
+        reason: reconnect ? 'reset_before_reconnect' : 'reset_before_start',
+        preserveSessionState: reconnect,
+      });
+      await loadVoiceRuntimeConfig();
+      voiceBoundSessionId = sessionId;
+      if (reconnect) voiceReconnectAttempt = attempt;
+      startVoiceSessionMetrics();
+      voiceConnecting = true;
+      updateComposerAction();
+      updateInputMeta();
+      setStatus('busy', 'Connecting voice');
+      if (reconnect) {
+        setStatus('busy', `Reconnecting voice (${attempt}/${VOICE_MAX_RECONNECT_ATTEMPTS})`);
+        recordVoiceSessionEvent('voice_reconnect_attempt_started', {
+          attempt,
+          maxAttempts: VOICE_MAX_RECONNECT_ATTEMPTS,
+        });
+      }
+      recordVoiceSessionEvent('microphone_request_started');
+
+      let peer = null;
+      try {
+        voiceMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordVoiceSessionEvent('microphone_acquired', {
+          trackCount: voiceMicStream.getAudioTracks().length,
+        });
+        for (const track of voiceMicStream.getAudioTracks()) {
+          track.addEventListener('ended', () => {
+            if (!voiceSessionMetrics || !voiceMicStream?.getTracks().includes(track)) return;
+            recordVoiceSessionEvent('microphone_track_ended', { trackState: track.readyState });
+            cleanupVoiceSession({ restoreStatus: true, reason: 'microphone_track_ended' });
+          });
+          track.addEventListener('mute', () => recordVoiceSessionEvent('microphone_track_muted'));
+          track.addEventListener('unmute', () => recordVoiceSessionEvent('microphone_track_unmuted'));
+        }
+        startMicWaveform(voiceMicStream);
+
+        peer = new RTCPeerConnection();
+        voicePeer = peer;
+        recordVoiceSessionEvent('peer_created', {}, peer, null);
+        peer.onconnectionstatechange = async () => {
+          if (voicePeer !== peer) return;
+          recordVoiceSessionEvent('peer_connection_state', { state: peer.connectionState }, peer, voiceChannel);
+          if (peer.connectionState === 'disconnected') {
+            await recordVoiceTransportStats('peer_disconnected_stats', peer, voiceChannel);
+            if (voicePeer !== peer || peer.connectionState !== 'disconnected') return;
+            setStatus('busy', 'Reconnecting voice');
+            if (!voiceDisconnectTimer) {
+              voiceDisconnectedAt = performance.now();
+              recordVoiceSessionEvent('peer_disconnect_grace_started', {
+                graceMs: VOICE_DISCONNECT_GRACE_MS,
+              }, peer, voiceChannel);
+              voiceDisconnectTimer = setTimeout(() => {
+                voiceDisconnectTimer = null;
+                if (voicePeer !== peer || peer.connectionState !== 'disconnected') return;
+                recordVoiceSessionEvent('peer_disconnect_timeout', {
+                  outageMs: Math.round(performance.now() - voiceDisconnectedAt),
+                }, peer, voiceChannel);
+                scheduleVoiceReconnect('peer_disconnect_timeout');
+              }, VOICE_DISCONNECT_GRACE_MS);
+            }
+            return;
+          }
+          if (voiceDisconnectTimer && peer.connectionState === 'connected') {
+            clearTimeout(voiceDisconnectTimer);
+            voiceDisconnectTimer = null;
+            await recordVoiceTransportStats('peer_reconnected_stats', peer, voiceChannel);
+            if (voicePeer !== peer) return;
+            recordVoiceSessionEvent('peer_reconnected', {
+              outageMs: voiceDisconnectedAt === null
+                ? null
+                : Math.round(performance.now() - voiceDisconnectedAt),
+            }, peer, voiceChannel);
+            voiceDisconnectedAt = null;
+            setStatus('online', 'Voice ready');
+          }
+          if (['failed', 'closed'].includes(peer.connectionState)) {
+            if (voiceDisconnectTimer) {
+              clearTimeout(voiceDisconnectTimer);
+              voiceDisconnectTimer = null;
+            }
+            await recordVoiceTransportStats(`peer_${peer.connectionState}_stats`, peer, voiceChannel);
+            if (voicePeer !== peer) return;
+            if (voiceActive || voiceConnecting) {
+              scheduleVoiceReconnect(`peer_${peer.connectionState}`);
+            }
+          }
+        };
+        peer.oniceconnectionstatechange = () => {
+          if (voicePeer !== peer) return;
+          recordVoiceSessionEvent('ice_connection_state', { state: peer.iceConnectionState }, peer, voiceChannel);
+        };
+        peer.onicegatheringstatechange = () => {
+          if (voicePeer !== peer) return;
+          recordVoiceSessionEvent('ice_gathering_state', { state: peer.iceGatheringState }, peer, voiceChannel);
+        };
+        peer.onsignalingstatechange = () => {
+          if (voicePeer !== peer) return;
+          recordVoiceSessionEvent('signaling_state', { state: peer.signalingState }, peer, voiceChannel);
+        };
+        peer.onicecandidateerror = (event) => {
+          if (voicePeer !== peer) return;
+          recordVoiceSessionEvent('ice_candidate_error', {
+            errorCode: event.errorCode || null,
+            errorText: event.errorText || null,
+            url: event.url || null,
+          }, peer, voiceChannel);
+        };
+        peer.ontrack = (event) => {
+          if (voicePeer !== peer) return;
+          const stream = event.streams[0];
+          recordVoiceSessionEvent('remote_track_received', {
+            kind: event.track?.kind || null,
+            trackState: event.track?.readyState || null,
+          }, peer, voiceChannel);
+          event.track?.addEventListener('ended', () => {
+            recordVoiceSessionEvent('remote_track_ended', { trackState: event.track.readyState }, peer, voiceChannel);
+          });
+          event.track?.addEventListener('mute', () => recordVoiceSessionEvent('remote_track_muted', {}, peer, voiceChannel));
+          event.track?.addEventListener('unmute', () => recordVoiceSessionEvent('remote_track_unmuted', {}, peer, voiceChannel));
+          voiceAudio.srcObject = stream;
+          startRemoteGlow(stream);
+          voiceAudio.play().catch(err => {
+            showToast(err.message || 'Voice playback failed.');
+          });
+        };
+
+        const channel = peer.createDataChannel('oai-events');
+        voiceChannel = channel;
+        recordVoiceSessionEvent('data_channel_created', {}, peer, channel);
+        channel.onopen = () => {
+          if (voicePeer !== peer || voiceChannel !== channel) return;
+          voiceActive = true;
+          voiceConnecting = false;
+          const recoveredAttempt = voiceReconnectAttempt;
+          recordVoiceSessionEvent('data_channel_open', {
+            reconnectAttempt: recoveredAttempt || null,
+          }, peer, channel);
+          if (recoveredAttempt) {
+            recordVoiceSessionEvent('voice_reconnect_succeeded', {
+              attempt: recoveredAttempt,
+            }, peer, channel);
+            voiceReconnectAttempt = 0;
+          }
+          setStatus('online', 'Voice ready');
+          updateComposerAction();
+          updateInputMeta();
+          sendVoiceSessionOpenNudge();
+        };
+        channel.onclose = () => {
+          if (voiceChannel !== channel) return;
+          recordVoiceSessionEvent('data_channel_close', {}, peer, channel);
+          scheduleVoiceReconnect('data_channel_closed');
+        };
+        channel.onerror = (event) => {
+          recordVoiceSessionEvent('data_channel_error', {
+            errorName: event.error?.name || null,
+            errorMessage: event.error?.message || null,
+            errorDetail: event.error?.errorDetail || null,
+            sctpCauseCode: event.error?.sctpCauseCode || null,
+          }, peer, channel);
+          showToast('Voice channel error.');
+        };
+        channel.onmessage = async ({ data }) => {
+          if (voiceChannel !== channel) return;
+          try {
+            await handleVoiceEvent(JSON.parse(data));
+          } catch (err) {
+            recordVoiceSessionEvent('data_channel_message_error', {
+              errorName: err.name || null,
+              errorMessage: err.message || String(err),
+            }, peer, channel);
+            showToast(err.message || 'Voice event failed.');
+          }
+        };
+
+        for (const track of voiceMicStream.getTracks()) {
+          peer.addTrack(track, voiceMicStream);
+        }
+
+        const offer = await peer.createOffer();
+        recordVoiceSessionEvent('offer_created', {}, peer, channel);
+        await peer.setLocalDescription(offer);
+        recordVoiceSessionEvent('local_description_set', {}, peer, channel);
+        await waitForIceGatheringComplete(peer);
+        recordVoiceSessionEvent('ice_gathering_complete', {}, peer, channel);
+        if (voicePeer !== peer) return;
+        recordVoiceSessionEvent('session_request_started', {}, peer, channel);
+        const voiceSessionPath = '/voice/session?sessionId=' + encodeURIComponent(voiceBoundSessionId);
+        const response = await fetch(apiUrl(voiceSessionPath), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/sdp' },
+          body: peer.localDescription.sdp,
+        });
+        const answer = await response.text();
+        recordVoiceSessionEvent('session_response_received', { status: response.status }, peer, channel);
+        if (!response.ok) {
+          const setupError = new Error(answer || 'Voice session failed.');
+          setupError.retryable = response.status >= 500;
+          throw setupError;
+        }
+        if (voicePeer !== peer) return;
+        await withTimeout(
+          peer.setRemoteDescription({ type: 'answer', sdp: answer }),
+          10000,
+          'Voice remote SDP timed out.',
+        );
+        recordVoiceSessionEvent('remote_description_set', {}, peer, channel);
+      } catch (err) {
+        // A stopped or replaced startup must not overwrite the newer UI state.
+        if (peer && voicePeer !== peer) return;
+        const retryable = err.retryable
+          || err.name === 'TypeError'
+          || /timed out|not respond|not reachable/i.test(err.message || '');
+        if (retryable && voiceBoundSessionId) {
+          scheduleVoiceReconnect(reconnect ? 'reconnect_setup_error' : 'setup_error', {
+            errorName: err.name || null,
+            errorMessage: err.message || String(err),
+          });
+          return;
+        }
+        cleanupVoiceSession({
+          reason: 'setup_error',
+          detail: {
+            errorName: err.name || null,
+            errorMessage: err.message || String(err),
+          },
+        });
+        setStatus('error', 'Voice error');
+        showToast(err.message || 'Could not start voice.');
+      }
+    }
+
+    function toggleVoiceSession() {
+      if (voiceActive || voiceConnecting) {
+        stopVoiceSession();
+        return;
+      }
+      startVoiceSession();
+    }
+
     async function readJsonResponse(response, fallbackMessage) {
       const text = await response.text();
       let data = null;
@@ -1816,13 +3552,14 @@
 
       if (role === 'assistant') {
         bubble.innerHTML = options.pending ? (text ? escapeHtml(text) : '') : renderMarkdown(text);
-      } else if (options.imageUrl) {
+      } else if (options.imageUrl || options.attachments?.length) {
         const wrap = document.createElement('div');
         wrap.className = 'message-attachment';
+        const attachment = (options.attachments || []).find(item => item?.type === 'image');
         const image = document.createElement('img');
         image.className = 'message-image';
-        image.src = options.imageUrl;
-        image.alt = options.imageName || 'Attached image';
+        image.src = options.imageUrl || attachment?.dataUrl || '';
+        image.alt = options.imageName || attachment?.filename || 'Attached image';
         wrap.appendChild(image);
         if (text) {
           const label = document.createElement('div');
@@ -1853,15 +3590,9 @@
     function autoSizeInput() {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 132) + 'px';
-      sendBtn.disabled = input.value.trim().length === 0 && !selectedImage;
       updateInputMeta();
-    }
-
-    function formatCompactNumber(value) {
-      if (value >= 1000) {
-        return (value / 1000).toFixed(value >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k';
-      }
-      return String(value);
+      updateComposerAction();
+      updateComposerSpace();
     }
 
     function formatBytes(bytes) {
@@ -1910,11 +3641,8 @@
     }
 
     function updateInputMeta() {
-      const charCount = input.value.length;
-      const estimatedTokens = Math.ceil(charCount / TOKEN_ESTIMATE_CHARS);
-      const attachmentText = selectedImage ? ` / ${formatBytes(selectedImage.size)} image` : '';
-      inputMeta.textContent = `${charCount.toLocaleString()} / ${MAX_INPUT_CHARS.toLocaleString()} chars / ~${formatCompactNumber(estimatedTokens)} tokens${attachmentText}`;
-      inputMeta.classList.toggle('warning', charCount >= MAX_INPUT_CHARS * 0.9);
+      inputMeta.textContent = '';
+      inputMeta.classList.remove('warning');
     }
 
     // --- Event Listeners ---
@@ -1957,21 +3685,37 @@
     topAddStrandBtn.addEventListener('click', createStrand);
 
     window.addEventListener('online', () => {
+      recordVoiceSessionEvent('browser_online');
       setStatus('online', 'Online');
       wsConnect();
     });
 
-    window.addEventListener('offline', () => setStatus('error', 'Offline'));
+    window.addEventListener('offline', () => {
+      recordVoiceSessionEvent('browser_offline');
+      setStatus('error', 'Offline');
+    });
 
     // Presence: notify Cal when tab visibility changes
     document.addEventListener('visibilitychange', () => {
       const status = document.hidden ? 'away' : 'active';
+      recordVoiceSessionEvent('visibility_changed', { state: document.visibilityState });
+      if (document.hidden && voiceSessionMetrics) {
+        persistVoiceSessionMetrics('visibility_hidden', {}, { final: false, useBeacon: true });
+      }
       wsSend({ type: 'presence', status });
+    });
+
+    window.addEventListener('pagehide', () => {
+      if (voiceSessionMetrics) {
+        persistVoiceSessionMetrics('pagehide', {}, { final: false, useBeacon: true });
+      }
     });
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
+        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+          .then(registration => registration.update())
+          .catch(() => {});
       });
     }
 
