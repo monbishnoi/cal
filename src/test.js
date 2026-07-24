@@ -30,6 +30,11 @@ const {
 } = await import('./http-server.js');
 const { SessionManager, setActiveSessionManager } = await import('./session-manager.js');
 const { getTools, executeToolCall } = await import('./tools.js');
+const {
+  __resetCodexNotificationPolicyForTest,
+  __setCodexNotificationPolicyPathForTest,
+  getCodexNotificationPolicy,
+} = await import('./codex-notification-policy.js');
 
 function createFakeSession(sessionId = 'test-main') {
   return {
@@ -691,6 +696,72 @@ async function testCrossSessionToolsRegistrationAndExecution() {
   }
 }
 
+async function testCalSessionCompleteIsolatedDoesNotMutateHistory() {
+  const session = new CalSession('isolated-completion-test', { persist: false });
+  const originalMessages = [{ role: 'user', content: 'Visible conversation' }];
+  let request = null;
+
+  session.messages = structuredClone(originalMessages);
+  session.isInitialized = true;
+  session.systemPrompt = 'Cal system context';
+  session.client = {
+    messages: {
+      async create(input) {
+        request = input;
+        return {
+          content: [{ type: 'text', text: '{"hasOpenQuestions":false}' }],
+        };
+      },
+    },
+  };
+
+  const result = await session.completeIsolated('Analyze this response', { maxTokens: 900 });
+
+  assert.equal(result, '{"hasOpenQuestions":false}');
+  assert.deepEqual(session.messages, originalMessages);
+  assert.deepEqual(request.tools, []);
+  assert.equal(request.system, 'Cal system context');
+  assert.equal(request.max_tokens, 900);
+}
+
+async function testCodexNotificationModeAndAttentionUi() {
+  const previousCodex = process.env.CODEX_ENABLED;
+  const previousMulti = process.env.MULTI_SESSION_ENABLED;
+  const policyPath = join(tempDir, 'codex-notification-policy.json');
+
+  try {
+    process.env.CODEX_ENABLED = 'true';
+    process.env.MULTI_SESSION_ENABLED = 'true';
+    __setCodexNotificationPolicyPathForTest(policyPath);
+
+    const tools = getTools({ includeMCP: false }).map(tool => tool.name);
+    assert(tools.includes('codex_notification_mode'));
+
+    const request = await executeToolCall('codex_notification_mode', {
+      action: 'set',
+      mode: 'dont-ask-me',
+    });
+    assert.match(request, /confirm/i);
+    assert.equal(getCodexNotificationPolicy().mode, 'ask-me');
+
+    const confirmation = await executeToolCall('codex_notification_mode', {
+      action: 'confirm',
+      approved: true,
+    });
+    assert.match(confirmation, /dont-ask-me/);
+    assert.equal(getCodexNotificationPolicy().mode, 'dont-ask-me');
+
+    const html = readFileSync(join(process.cwd(), 'clients', 'pwa', 'index.html'), 'utf8');
+    assert.match(html, /\.session-tab\.attention \.tab-dot/);
+    assert.match(html, /state === 'attention'/);
+    assert.match(html, /setStatus\('attention', 'Needs input'\)/);
+  } finally {
+    process.env.CODEX_ENABLED = previousCodex || '';
+    process.env.MULTI_SESSION_ENABLED = previousMulti || '';
+    __resetCodexNotificationPolicyForTest();
+  }
+}
+
 try {
   await testSessionBridgeWritesStrandAwareActiveContext();
   await testContextLoadsStrandSpecificActiveContext();
@@ -706,6 +777,8 @@ try {
   await testMultiSessionWebSocketTags();
   await testMultiSessionUnknownWebSocketSessionRecovery();
   await testCrossSessionToolsRegistrationAndExecution();
+  await testCalSessionCompleteIsolatedDoesNotMutateHistory();
+  await testCodexNotificationModeAndAttentionUi();
   console.log('All Cal Gateway tests passed');
 } finally {
   stopHttpServer();

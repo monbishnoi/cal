@@ -144,7 +144,13 @@ Optional MCP examples include [Google Workspace MCP](docs/google-workspace-mcp.m
 
 ### Optional Codex Delegation
 
-Set `CODEX_ENABLED=true` and `MULTI_SESSION_ENABLED=true` to expose `codex_send` and `codex_check`. `codex_send` returns immediately, runs Codex in the background through `@openai/codex-sdk`, and routes completion into a dedicated `Codex` Strand instead of interrupting Cal home.
+Set `CODEX_ENABLED=true` and `MULTI_SESSION_ENABLED=true` to expose `codex_send`, `codex_check`, and `codex_notification_mode`. `codex_send` returns immediately, runs Codex in the background through `@openai/codex-sdk`, and keeps the complete delegation timeline in a dedicated `Codex` Strand instead of interrupting Cal home.
+
+The Strand uses three states: yellow `working`, blue `attention` when Codex needs input, and green `ready` when the task is finished. After each Codex turn, Cal analyzes the full SDK response. If Codex has a blocking question, the Strand records the question and Cal's proposed answer.
+
+The default `/ask-me` mode waits for approval in the Codex Strand. Reply `yes` to approve Cal's draft, `no` to leave it pending, or type a replacement answer. Cal then resumes the same underlying Codex thread. `/dont-ask-me` enables unattended answers after one confirmation, with a maximum of three automatic question-and-answer cycles before the Strand returns to blue attention. The Gateway also sends a minimal nudge through its configured notification channel.
+
+The standing mode is stored locally in `data/codex-notification-policy.json`, which is ignored by Git. See [Codex Notification Loop](docs/codex-notification-loop.md) for the full flow and operating modes.
 
 To keep all delegations in one visible Codex Desktop thread, set:
 

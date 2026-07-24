@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.1.0 - 2026-07-23
+
+- Added a closed-loop workflow for Cal-initiated Codex tasks that detects blocking questions from the full Codex response.
+- Added a blue `attention` Strand state with Codex questions, Cal's proposed answer, and approval or replacement replies in one timeline.
+- Added same-thread Codex resume after approval so task context and execution history remain intact.
+- Added `/ask-me` and confirmation-gated `/dont-ask-me` policies, with a three-cycle autonomous safety cap.
+- Added provider-neutral attention notifications through the Gateway's configured notification channel.
+- Added focused loop tests and preserved existing text, voice, image, Strand, scheduler, and Session Bridge behavior.
+
 ## v2.0.0 - 2026-07-17
 
 - Added optional Talkbox voice mode to the PWA through environment-configured `/voice/*` proxy routes.

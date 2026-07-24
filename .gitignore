@@ -4,6 +4,7 @@ config/.env.push
 config/tls.crt
 config/tls.key
 data/push-subscriptions.json
+data/codex-notification-policy.json
 config/.env
 config/jobs.json
 config/user.json

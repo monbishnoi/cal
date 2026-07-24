@@ -40,6 +40,12 @@ function normalizeName(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+function normalizeSessionStatus(status) {
+  if (status === 'working' || status === 'processing') return 'working';
+  if (status === 'attention') return 'attention';
+  return 'ready';
+}
+
 function ensureDailyHeader(filePath, title) {
   if (fs.existsSync(filePath)) return;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -269,7 +275,7 @@ export class SessionManager {
     return {
       sessionId: record.sessionId,
       name: record.name,
-      status: status === 'working' || status === 'processing' ? 'working' : 'ready',
+      status: normalizeSessionStatus(status),
       createdAt: record.createdAt,
       permanent: !!record.permanent,
       messageCount: record.runtime?.messages?.length || 0,
@@ -279,7 +285,7 @@ export class SessionManager {
   setStatus(sessionId, status) {
     const record = this.getRecord(sessionId);
     if (!record) return;
-    record.status = status === 'working' || status === 'processing' ? 'working' : 'ready';
+    record.status = normalizeSessionStatus(status);
   }
 
   async routeMessage(sessionId, text, options = {}) {

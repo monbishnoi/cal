@@ -17,6 +17,11 @@ import { CAL_HOME, SCRIPTS_DIR } from './paths.js';
 import { checkMacFeature, isMacOS, isCommandAvailable, getCommandPath } from './detect.js';
 import { getActiveSessionManager, isMultiSessionEnabled } from './session-manager.js';
 import { isCodexEnabled, sendCodexTask, checkCodex } from './codex-bridge.js';
+import {
+  confirmCodexNotificationMode,
+  getCodexNotificationPolicy,
+  requestCodexNotificationMode,
+} from './codex-notification-policy.js';
 
 const execAsync = promisify(exec);
 const DEFAULT_BASH_TIMEOUT_MS = parsePositiveInt(process.env.CAL_BASH_TIMEOUT_MS, 5 * 60 * 1000);
@@ -513,6 +518,30 @@ export function getTools(options = {}) {
             },
           },
         },
+      },
+      {
+        name: 'codex_notification_mode',
+        description: 'Read or change the global policy for handling questions returned by Cal-initiated Codex tasks. Use this when the user expresses the intent naturally, such as "handle Codex questions without asking me" or "ask me before answering Codex." Switching to dont-ask-me always requires a separate confirmation.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['get', 'set', 'confirm'],
+              description: 'Use get to inspect the mode, set to request a mode, and confirm for the user response to a pending dont-ask-me request.',
+            },
+            mode: {
+              type: 'string',
+              enum: ['ask-me', 'dont-ask-me'],
+              description: 'Required for action=set.',
+            },
+            approved: {
+              type: 'boolean',
+              description: 'Required for action=confirm.',
+            },
+          },
+          required: ['action'],
+        },
       }
     );
   }
@@ -683,6 +712,18 @@ export async function executeToolCall(toolName, input, context = {}) {
 
     case 'codex_check':
       return checkCodex(input || {});
+
+    case 'codex_notification_mode':
+      if (input.action === 'get') {
+        return JSON.stringify(getCodexNotificationPolicy(), null, 2);
+      }
+      if (input.action === 'set') {
+        return requestCodexNotificationMode(input.mode).message;
+      }
+      if (input.action === 'confirm') {
+        return confirmCodexNotificationMode(input.approved === true).message;
+      }
+      return 'Error: action must be get, set, or confirm.';
 
     default:
       {

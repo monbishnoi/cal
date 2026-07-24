@@ -850,6 +850,35 @@ export class CalSession {
   }
 
   /**
+   * Run a stateless, no-tools completion with Cal's current system context.
+   * This is used for internal classification work that must not alter visible
+   * conversation history or compete with an interactive session's tool loop.
+   */
+  async completeIsolated(userMessage, options = {}) {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: options.maxTokens || 2500,
+      system: this.systemPrompt,
+      messages: [{
+        role: 'user',
+        content: String(userMessage || ''),
+      }],
+      tools: [],
+      stream: false,
+    });
+
+    return (response.content || [])
+      .filter(part => part.type === 'text')
+      .map(part => part.text || '')
+      .join('\n')
+      .trim();
+  }
+
+  /**
    * Call Claude API with current message history
    */
   async callClaude() {

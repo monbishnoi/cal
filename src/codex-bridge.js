@@ -11,12 +11,18 @@ import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { getActiveSessionManager, isMultiSessionEnabled, setSessionMessageInterceptor } from './session-manager.js';
 import { publishEvent } from './event-bus.js';
+import {
+  CODEX_NOTIFICATION_MODES,
+  getCodexNotificationPolicy,
+  handleCodexNotificationPolicyInput,
+} from './codex-notification-policy.js';
 
 const CODEX_STRAND_NAME = 'Codex';
 const SESSION_INDEX_PATH = path.join(os.homedir(), '.codex', 'session_index.jsonl');
 const SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
 const STATE_DB_PATH = path.join(os.homedir(), '.codex', 'state_5.sqlite');
 const SQLITE3_PATH = '/usr/bin/sqlite3';
+const MAX_AUTONOMOUS_CYCLES = 3;
 
 let CodexClass = null;
 let codex = null;
@@ -26,6 +32,8 @@ let codexFactoryForTest = null;
 let sessionsDirForTest = null;
 let sessionIndexPathForTest = null;
 let stateDbPathForTest = null;
+let responseAnalyzer = null;
+let notificationSender = null;
 
 const tasks = new Map();
 const CODEX_SANDBOX_PROFILES = {
@@ -48,6 +56,11 @@ export function validateCodexStartupConfig() {
   if (isCodexEnabled() && !isMultiSessionEnabled()) {
     throw new Error('CODEX_ENABLED=true requires MULTI_SESSION_ENABLED=true. Exiting.');
   }
+}
+
+export function configureCodexNotificationLoop({ analyzeResponse, notify } = {}) {
+  responseAnalyzer = typeof analyzeResponse === 'function' ? analyzeResponse : null;
+  notificationSender = typeof notify === 'function' ? notify : null;
 }
 
 function resolveSandboxProfile(sandbox) {
@@ -224,6 +237,79 @@ function formatCodexTurnSentMessage(messageText) {
   ].join('\n');
 }
 
+function formatPendingFeedbackMessage(state, analysis, options = {}) {
+  const questions = analysis.questions.length
+    ? analysis.questions.map((question, index) => `${index + 1}. ${question}`).join('\n')
+    : truncateText(state.finalResponse, 1600);
+  const heading = options.unattended
+    ? `🔄 Running unattended (${options.cycle}/${MAX_AUTONOMOUS_CYCLES})`
+    : '⏳ Task pending feedback';
+
+  return [
+    heading,
+    '',
+    'Codex needs input:',
+    questions,
+    '',
+    'Cal’s proposed answer:',
+    analysis.draftAnswer || '(Cal could not produce a safe draft. Please answer Codex directly.)',
+    '',
+    options.unattended
+      ? 'Cal is sending this answer back into the same Codex thread.'
+      : 'Reply “yes” to approve, “no” to keep this pending, or type a replacement answer.',
+  ].join('\n');
+}
+
+function normalizeAnalysis(value) {
+  const questions = Array.isArray(value?.questions)
+    ? value.questions.map(question => String(question || '').trim()).filter(Boolean)
+    : [];
+  const draftAnswer = String(value?.draftAnswer || '').trim();
+  const hasOpenQuestions = value?.hasOpenQuestions === true || questions.length > 0;
+
+  return {
+    hasOpenQuestions,
+    questions,
+    draftAnswer,
+  };
+}
+
+async function analyzeFinalResponse(state) {
+  if (!responseAnalyzer || state.status !== 'completed') {
+    return { hasOpenQuestions: false, questions: [], draftAnswer: '' };
+  }
+
+  try {
+    const analysis = normalizeAnalysis(await responseAnalyzer({
+      task: state.task,
+      fullResponse: state.finalResponse,
+      threadId: state.threadId,
+    }));
+    if (analysis.hasOpenQuestions && !analysis.draftAnswer) {
+      console.warn(`[Codex Bridge] Open questions found for ${state.taskId || state.threadId}, but Cal did not return a draft.`);
+    }
+    return analysis;
+  } catch (err) {
+    console.warn(`[Codex Bridge] Response analysis failed: ${err.message}`);
+    return {
+      hasOpenQuestions: true,
+      questions: ['Cal could not safely analyze the Codex response. Review the response before continuing.'],
+      draftAnswer: '',
+    };
+  }
+}
+
+async function sendAttentionNotification(state) {
+  if (!notificationSender) return;
+  try {
+    await notificationSender(
+      `Codex needs input on “${truncateText(state.task, 90)}”. See the blue Codex strand in Cal.`
+    );
+  } catch (err) {
+    console.warn(`[Codex Bridge] Could not send attention notification: ${err.message}`);
+  }
+}
+
 function publishSessionsChanged(manager, sessionId) {
   publishEvent({
     type: 'sessions_changed',
@@ -251,12 +337,17 @@ function getOrCreateCodexRecord() {
 
 function setCodexStrandStatus(manager, sessionId, status) {
   manager.setStatus(sessionId, status);
+  const eventState = status === 'working'
+    ? 'processing'
+    : status === 'attention'
+      ? 'attention'
+      : 'idle';
   publishEvent({
     type: 'status_changed',
     sessionId,
     runId: null,
     source: 'codex',
-    payload: { state: status === 'working' ? 'processing' : 'idle' },
+    payload: { state: eventState },
   });
   publishSessionsChanged(manager, sessionId);
 }
@@ -274,11 +365,17 @@ function appendCodexResult(manager, sessionId, text) {
 
 function updateCodexSessionMetadata(manager, sessionId, state) {
   if (!manager?.setMetadata) return;
+  const current = manager.getMetadata?.(sessionId)?.codex || {};
   manager.setMetadata(sessionId, {
     codex: {
-      threadId: state.threadId || null,
-      project: state.project,
-      sandbox: state.sandbox,
+      ...current,
+      taskId: state.taskId || current.taskId || null,
+      task: state.task || current.task || '',
+      threadId: state.threadId || current.threadId || null,
+      project: state.project || current.project,
+      sandbox: state.sandbox || current.sandbox || 'restricted',
+      pendingFeedback: state.pendingFeedback || null,
+      autonomousCycles: state.autonomousCycles || 0,
     },
   });
   publishSessionsChanged(manager, sessionId);
@@ -362,6 +459,8 @@ export async function sendCodexTask({ task, project, threadId, sandbox } = {}) {
       error: null,
       sandbox: sandboxProfile.name,
       sandboxOptions,
+      autonomousCycles: 0,
+      pendingFeedback: null,
     };
 
     tasks.set(taskId, state);
@@ -383,18 +482,36 @@ export async function sendCodexTask({ task, project, threadId, sandbox } = {}) {
 }
 
 async function runCodexTaskInBackground(state, manager, strandSessionId) {
+  await runCodexConversation(state, manager, strandSessionId, state.task, {
+    allowThreadFallback: true,
+    completionKind: 'task',
+  });
+}
+
+async function executeCodexTurn(state, prompt, { allowThreadFallback = false } = {}) {
+  state.status = 'working';
+  state.startedAt = state.startedAt || new Date().toISOString();
+  state.turnStartedAt = new Date().toISOString();
+  state.completedAt = null;
+  state.finalResponse = '';
+  state.usage = null;
+  state.error = null;
+
   try {
     const client = await ensureCodexClient();
+    const sandboxProfile = resolveSandboxProfile(state.sandbox);
     const options = {
       workingDirectory: state.project,
       skipGitRepoCheck: true,
-      ...state.sandboxOptions,
+      ...sandboxProfile.options,
     };
     let thread;
+
     if (state.threadId) {
       try {
         thread = client.resumeThread(state.threadId, options);
       } catch (err) {
+        if (!allowThreadFallback) throw err;
         const message = err?.message || String(err);
         console.warn(`[Codex Bridge] Could not resume Codex thread ${state.threadId}; starting a new thread: ${message}`);
         thread = client.startThread(options);
@@ -402,28 +519,109 @@ async function runCodexTaskInBackground(state, manager, strandSessionId) {
     } else {
       thread = client.startThread(options);
     }
-    const prompt = state.task;
-    const result = await thread.run(prompt);
 
+    const result = await thread.run(prompt);
     state.threadId = thread.id || state.threadId;
     state.status = 'completed';
     state.completedAt = new Date().toISOString();
     state.items = result.items || [];
     state.finalResponse = result.finalResponse || '';
     state.usage = result.usage || null;
+
+    if (state.threadId) {
+      await markCodexThreadVisibleInDesktop(state.threadId);
+    }
   } catch (err) {
     state.status = 'failed';
     state.completedAt = new Date().toISOString();
     state.error = normalizeCodexError(err).message;
-  } finally {
-    if (state.status === 'completed' && state.threadId) {
-      await markCodexThreadVisibleInDesktop(state.threadId);
-    }
-    tasks.set(state.taskId, state);
-    updateCodexSessionMetadata(manager, strandSessionId, state);
-    appendCodexResult(manager, strandSessionId, formatTaskCompletionMessage(state));
-    setCodexStrandStatus(manager, strandSessionId, 'ready');
   }
+
+  if (state.taskId) tasks.set(state.taskId, state);
+  return state;
+}
+
+async function runCodexConversation(state, manager, sessionId, initialPrompt, options = {}) {
+  let prompt = initialPrompt;
+  let allowThreadFallback = options.allowThreadFallback === true;
+  const completionKind = options.completionKind || 'turn';
+
+  while (prompt) {
+    setCodexStrandStatus(manager, sessionId, 'working');
+    await executeCodexTurn(state, prompt, { allowThreadFallback });
+    allowThreadFallback = false;
+    updateCodexSessionMetadata(manager, sessionId, state);
+
+    if (state.status === 'failed') {
+      appendCodexResult(
+        manager,
+        sessionId,
+        completionKind === 'task'
+          ? formatTaskCompletionMessage(state)
+          : formatCodexTurnCompletionMessage(state)
+      );
+      setCodexStrandStatus(manager, sessionId, 'ready');
+      return state;
+    }
+
+    const analysis = await analyzeFinalResponse(state);
+    if (!analysis.hasOpenQuestions) {
+      state.pendingFeedback = null;
+      updateCodexSessionMetadata(manager, sessionId, state);
+      appendCodexResult(
+        manager,
+        sessionId,
+        completionKind === 'task'
+          ? formatTaskCompletionMessage(state)
+          : formatCodexTurnCompletionMessage(state)
+      );
+      setCodexStrandStatus(manager, sessionId, 'ready');
+      return state;
+    }
+
+    const policy = getCodexNotificationPolicy();
+    if (
+      policy.mode === CODEX_NOTIFICATION_MODES.DONT_ASK_ME &&
+      analysis.draftAnswer &&
+      state.autonomousCycles < MAX_AUTONOMOUS_CYCLES
+    ) {
+      state.autonomousCycles += 1;
+      state.pendingFeedback = null;
+      appendCodexResult(manager, sessionId, formatPendingFeedbackMessage(state, analysis, {
+        unattended: true,
+        cycle: state.autonomousCycles,
+      }));
+      updateCodexSessionMetadata(manager, sessionId, state);
+      prompt = analysis.draftAnswer;
+      continue;
+    }
+
+    state.status = 'attention';
+    state.pendingFeedback = {
+      questions: analysis.questions,
+      draftAnswer: analysis.draftAnswer,
+      codexResponse: state.finalResponse,
+      createdAt: new Date().toISOString(),
+      reason: state.autonomousCycles >= MAX_AUTONOMOUS_CYCLES
+        ? 'autonomous-cycle-limit'
+        : 'approval-required',
+    };
+    updateCodexSessionMetadata(manager, sessionId, state);
+    appendCodexResult(manager, sessionId, formatPendingFeedbackMessage(state, analysis));
+    setCodexStrandStatus(manager, sessionId, 'attention');
+    await sendAttentionNotification(state);
+    return state;
+  }
+
+  return state;
+}
+
+function isApproval(text) {
+  return /^(yes|y|approve|approved|send it|go ahead|proceed)$/i.test(String(text || '').trim());
+}
+
+function isPureRejection(text) {
+  return /^(no|n|reject|rejected|not yet)$/i.test(String(text || '').trim());
 }
 
 async function handleCodexStrandMessage({ manager, record, sessionId, text }) {
@@ -442,6 +640,14 @@ async function handleCodexStrandMessage({ manager, record, sessionId, text }) {
   }
 
   manager.appendUserMessage(sessionId, messageText);
+  const policyResult = handleCodexNotificationPolicyInput(messageText);
+  if (policyResult) {
+    appendCodexResult(manager, sessionId, policyResult.message);
+    return {
+      handled: true,
+      result: { text: policyResult.message, usageStatus: null, command: true },
+    };
+  }
 
   if (!codexMeta.threadId) {
     const waiting = 'Codex is still starting this thread. Try again after the first task finishes.';
@@ -449,11 +655,33 @@ async function handleCodexStrandMessage({ manager, record, sessionId, text }) {
     return { handled: true, result: { text: waiting, usageStatus: null } };
   }
 
-  const turn = {
+  if (codexMeta.pendingFeedback && isPureRejection(messageText)) {
+    const waiting = 'Cal’s draft was not sent. This Codex task is still waiting for your direction. Reply with the answer or changes you want sent.';
+    appendCodexResult(manager, sessionId, waiting);
+    setCodexStrandStatus(manager, sessionId, 'attention');
+    return { handled: true, result: { text: waiting, usageStatus: null } };
+  }
+
+  const outboundMessage = codexMeta.pendingFeedback && isApproval(messageText)
+    ? String(codexMeta.pendingFeedback.draftAnswer || '').trim()
+    : messageText;
+
+  if (!outboundMessage) {
+    const waiting = 'Cal does not have a draft to approve. Reply with the answer you want sent to Codex.';
+    appendCodexResult(manager, sessionId, waiting);
+    setCodexStrandStatus(manager, sessionId, 'attention');
+    return { handled: true, result: { text: waiting, usageStatus: null } };
+  }
+
+  const state = {
+    taskId: codexMeta.taskId || null,
+    task: codexMeta.task || 'Codex Strand follow-up',
     status: 'working',
     threadId: codexMeta.threadId,
     project: codexMeta.project,
     sandbox: codexMeta.sandbox || 'restricted',
+    autonomousCycles: 0,
+    pendingFeedback: null,
     startedAt: new Date().toISOString(),
     completedAt: null,
     finalResponse: '',
@@ -461,43 +689,16 @@ async function handleCodexStrandMessage({ manager, record, sessionId, text }) {
     error: null,
   };
 
-  setCodexStrandStatus(manager, sessionId, 'working');
-  appendCodexResult(manager, sessionId, formatCodexTurnSentMessage(messageText));
-
-  try {
-    const client = await ensureCodexClient();
-    const sandboxProfile = resolveSandboxProfile(turn.sandbox);
-    const thread = client.resumeThread(turn.threadId, {
-      workingDirectory: turn.project,
-      skipGitRepoCheck: true,
-      ...sandboxProfile.options,
-    });
-    const result = await thread.run(messageText);
-
-    turn.threadId = thread.id || turn.threadId;
-    turn.status = 'completed';
-    turn.completedAt = new Date().toISOString();
-    turn.finalResponse = result.finalResponse || '';
-    turn.usage = result.usage || null;
-
-    if (turn.threadId) {
-      await markCodexThreadVisibleInDesktop(turn.threadId);
-    }
-    updateCodexSessionMetadata(manager, sessionId, turn);
-  } catch (err) {
-    turn.status = 'failed';
-    turn.completedAt = new Date().toISOString();
-    turn.error = normalizeCodexError(err).message;
-  } finally {
-    const responseText = formatCodexTurnCompletionMessage(turn);
-    appendCodexResult(manager, sessionId, responseText);
-    setCodexStrandStatus(manager, sessionId, 'ready');
-  }
+  updateCodexSessionMetadata(manager, sessionId, state);
+  appendCodexResult(manager, sessionId, formatCodexTurnSentMessage(outboundMessage));
+  await runCodexConversation(state, manager, sessionId, outboundMessage, {
+    completionKind: 'turn',
+  });
 
   return {
     handled: true,
     result: {
-      text: turn.status === 'completed' ? turn.finalResponse : turn.error,
+      text: state.status === 'failed' ? state.error : state.finalResponse,
       usageStatus: null,
     },
   };
@@ -640,5 +841,7 @@ export function __resetCodexBridgeForTest() {
   sessionsDirForTest = null;
   sessionIndexPathForTest = null;
   stateDbPathForTest = null;
+  responseAnalyzer = null;
+  notificationSender = null;
   tasks.clear();
 }

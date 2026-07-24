@@ -26,6 +26,7 @@
       --assistant: #24262c;
       --accent: #d6a45f;
       --accent-2: #58c7a5;
+      --attention: #5b9dff;
       --danger: #f07167;
       --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
       --safe-top: env(safe-area-inset-top, 0px);
@@ -212,6 +213,12 @@
     .status-dot.busy {
       background: var(--accent);
       animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    .status-dot.attention {
+      background: var(--attention);
+      box-shadow: 0 0 13px rgba(91, 157, 255, 0.78);
+      animation: pulse 1.45s ease-in-out infinite;
     }
 
     .status-dot.error {
@@ -406,6 +413,12 @@
       background: var(--accent);
       box-shadow: none;
       animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    .session-tab.attention .tab-dot {
+      background: var(--attention);
+      box-shadow: 0 0 11px rgba(91, 157, 255, 0.8);
+      animation: pulse 1.45s ease-in-out infinite;
     }
 
     .close-tab {
@@ -1305,7 +1318,9 @@
     }
 
     function normalizeSessionStatus(state) {
-      return state === 'processing' || state === 'working' ? 'working' : 'ready';
+      if (state === 'processing' || state === 'working') return 'working';
+      if (state === 'attention') return 'attention';
+      return 'ready';
     }
 
     function isSessionMissingError(error) {
@@ -1439,7 +1454,7 @@
         tab.className = 'session-tab ' +
           (session.sessionId === activeSessionId ? 'active ' : '') +
           (session.permanent ? 'permanent ' : '') +
-          (session.status === 'working' ? 'working' : 'ready');
+          session.status;
         tab.dataset.sessionId = session.sessionId;
         tab.setAttribute('aria-label', session.name);
         tab.innerHTML = `<span class="tab-dot"></span><span class="tab-name">${escapeHtml(session.name)}</span>`;
@@ -1485,7 +1500,11 @@
         return;
       }
       isProcessing = active.status === 'working';
-      setStatus(isProcessing ? 'busy' : 'online', isProcessing ? 'Working' : 'Ready');
+      if (active.status === 'attention') {
+        setStatus('attention', 'Needs input');
+      } else {
+        setStatus(isProcessing ? 'busy' : 'online', isProcessing ? 'Working' : 'Ready');
+      }
     }
 
     function syncActiveHistory() {
@@ -1573,6 +1592,9 @@
           if (msg.state === 'processing') {
             isProcessing = true;
             setStatus('busy', 'Working');
+          } else if (msg.state === 'attention') {
+            isProcessing = false;
+            setStatus('attention', 'Needs input');
           } else if (msg.state === 'idle') {
             isProcessing = false;
             setStatus('online', 'Ready');

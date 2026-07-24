@@ -5,6 +5,7 @@
 
 import { execSync } from 'child_process';
 import { getSkillNames } from './skills.js';
+import { handleCodexNotificationPolicyInput } from './codex-notification-policy.js';
 
 function isCommandAvailable(cmd) {
   try {
@@ -20,6 +21,11 @@ function isCommandAvailable(cmd) {
  */
 export function handleCommand(text, session) {
   const cmd = text.trim().toLowerCase();
+  const codexPolicyResult = handleCodexNotificationPolicyInput(text);
+
+  if (codexPolicyResult) {
+    return { response: codexPolicyResult.message };
+  }
 
   if (cmd === '/reset') {
     session.reset();

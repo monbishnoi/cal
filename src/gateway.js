@@ -26,7 +26,12 @@ import { getToday } from './context.js';
 import { getMainSessionId, getBackgroundSessionId, getTimezone } from './user-config.js';
 import { filterRuntimeMCPServers } from './runtime-config.js';
 import { SessionManager, isMultiSessionEnabled, getActiveSessionManager } from './session-manager.js';
-import { initializeCodexBridge, validateCodexStartupConfig, isCodexEnabled } from './codex-bridge.js';
+import {
+  configureCodexNotificationLoop,
+  initializeCodexBridge,
+  validateCodexStartupConfig,
+  isCodexEnabled,
+} from './codex-bridge.js';
 import { writeActiveContextsForSessions } from './session-bridge.js';
 import fs from 'fs';
 import path from 'path';
@@ -53,7 +58,7 @@ try {
 }
 
 // Gateway version
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 
 // Session IDs (from user config)
 const MAIN_SESSION_ID = getMainSessionId();
@@ -103,6 +108,35 @@ async function sendNotification(message) {
     console.log('[Gateway] No notification channel available');
     return false;
   }
+}
+
+function parseCodexAnalysis(text) {
+  const raw = String(text || '').trim();
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced?.[1] || raw.match(/\{[\s\S]*\}/)?.[0] || raw;
+  return JSON.parse(candidate);
+}
+
+async function analyzeCodexResponse({ task, fullResponse }) {
+  const prompt = [
+    'You are Cal reviewing the result of a coding task you delegated to Codex.',
+    'Determine whether Codex is finished or needs answers before it can continue.',
+    'Use the complete response below. Do not use tools. Return JSON only with this exact shape:',
+    '{"hasOpenQuestions": boolean, "questions": ["question"], "draftAnswer": "answer Cal recommends sending back"}',
+    '',
+    'Rules:',
+    '- Questions are open only when Codex is asking for information, approval, or a decision needed to continue.',
+    '- Do not treat optional follow-up offers or rhetorical questions as blockers.',
+    '- If there are open questions, draft a concrete answer using Cal context and the original task.',
+    '- If there are no open questions, questions must be [] and draftAnswer must be "".',
+    '',
+    `Original task:\n${task}`,
+    '',
+    `Complete Codex response:\n${fullResponse}`,
+  ].join('\n');
+
+  const result = await getMainSession().completeIsolated(prompt, { maxTokens: 2500 });
+  return parseCodexAnalysis(result);
 }
 
 /**
@@ -462,6 +496,10 @@ async function start() {
 
   if (isCodexEnabled()) {
     console.log('[Gateway] Initializing Codex bridge...');
+    configureCodexNotificationLoop({
+      analyzeResponse: analyzeCodexResponse,
+      notify: sendNotification,
+    });
     const codexStatus = await initializeCodexBridge();
     if (codexStatus.ok) {
       console.log('[Gateway] Codex bridge ready');
